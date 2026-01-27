@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { basename } from "path";
+import yargs, { type Argv, type CommandModule } from "yargs";
+import { hideBin } from "yargs/helpers";
 import { checkAwsCredentials } from "./aws";
 import { downCommand } from "./commands/down";
 import { initCommand } from "./commands/init";
@@ -11,155 +13,154 @@ import { upCommand } from "./commands/up";
 import type { CommandContext } from "./types";
 import { EnvManagerError } from "./types";
 
-const USAGE = `
-env-manager - manage environment variables with AWS Secrets Manager
-
-Commands:
-  up                      Upload .env schema and .env.local values to AWS
-  down                    Download .env and .env.local from AWS
-  ts [path]               Generate typed env.ts file (default: src/env.ts)
-  init                    Initialize .env from AWS or create template
-  list                    List all projects in env-manager namespace
-  new-key <KEY_NAME>      Create and add API key (e.g., ANTHROPIC_API_KEY)
-  new-key --list          List available keys
-
-Options:
-  -p, --project   Project name (default: current directory name)
-  --sdk           Use AWS SDK instead of AWS CLI
-  -h, --help      Show this help message
-`;
-
 const RESERVED_PROJECT_NAMES = ["default"];
 
-interface ParsedArgs {
-  command: string;
+interface GlobalArgs {
   project: string;
-  useSdk: boolean;
-  path?: string;
-  args: string[];
-  listFlag: boolean;
+  sdk: boolean;
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
-  let command = "";
-  let project = basename(process.cwd());
-  let useSdk = false;
-  let path: string | undefined;
-  let listFlag = false;
-  const args: string[] = [];
-
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-
-    if (arg === "-h" || arg === "--help") {
-      console.log(USAGE);
-      process.exit(0);
-    }
-
-    if (arg === "-p" || arg === "--project") {
-      project = argv[++i];
-      if (!project) {
-        throw new EnvManagerError("Missing project name after -p/--project");
-      }
-      continue;
-    }
-
-    if (arg.startsWith("--project=")) {
-      project = arg.slice("--project=".length);
-      continue;
-    }
-
-    if (arg === "--sdk") {
-      useSdk = true;
-      continue;
-    }
-
-    if (arg === "--list" || arg === "-l") {
-      listFlag = true;
-      continue;
-    }
-
-    if (arg.startsWith("-")) {
-      throw new EnvManagerError(`Unknown option: ${arg}`);
-    }
-
-    if (!command) {
-      command = arg;
-    } else if (command === "ts" && !path) {
-      path = arg;
-    } else {
-      args.push(arg);
-    }
-  }
-
-  return { command, project, useSdk, path, args, listFlag };
-}
-
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-
-  if (!args.command) {
-    console.log(USAGE);
-    process.exit(1);
-  }
-
+function validateProjectName(project: string, command: string): void {
   const commandsRestrictingDefault = ["up", "down", "init"];
   if (
-    commandsRestrictingDefault.includes(args.command) &&
-    RESERVED_PROJECT_NAMES.includes(args.project)
+    commandsRestrictingDefault.includes(command) &&
+    RESERVED_PROJECT_NAMES.includes(project)
   ) {
     throw new EnvManagerError(
-      `"${args.project}" is a reserved project name and cannot be used with ${args.command}`
+      `"${project}" is a reserved project name and cannot be used with ${command}`
     );
-  }
-
-  const ctx: CommandContext = {
-    project: args.project,
-    useSdk: args.useSdk,
-    cwd: process.cwd(),
-  };
-
-  const needsAws = ["up", "down", "init", "list", "new-key"].includes(args.command);
-  if (needsAws && !(args.command === "new-key" && args.listFlag)) {
-    await checkAwsCredentials();
-  }
-
-  switch (args.command) {
-    case "up":
-      await upCommand(ctx);
-      break;
-    case "down":
-      await downCommand(ctx);
-      break;
-    case "ts":
-      await tsCommand(ctx, args.path);
-      break;
-    case "init":
-      await initCommand(ctx);
-      break;
-    case "list":
-      await listCommand(ctx);
-      break;
-    case "new-key": {
-      if (args.listFlag) {
-        listKeysCommand();
-        break;
-      }
-      const keyName = args.args[0];
-      if (!keyName) {
-        throw new EnvManagerError(
-          "Key name required. Usage: env-manager new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys"
-        );
-      }
-      await newKeyCommand(ctx, keyName);
-      break;
-    }
-    default:
-      throw new EnvManagerError(`Unknown command: ${args.command}`);
   }
 }
 
-main().catch((e) => {
+function createContext(argv: GlobalArgs): CommandContext {
+  return {
+    project: argv.project,
+    useSdk: argv.sdk,
+    cwd: process.cwd(),
+  };
+}
+
+const upCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+  command: "up",
+  describe: "Upload .env schema and .env.local values to AWS",
+  handler: async (argv) => {
+    validateProjectName(argv.project, "up");
+    await checkAwsCredentials();
+    await upCommand(createContext(argv));
+  },
+};
+
+const downCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+  command: "down",
+  describe: "Download .env and .env.local from AWS",
+  handler: async (argv) => {
+    validateProjectName(argv.project, "down");
+    await checkAwsCredentials();
+    await downCommand(createContext(argv));
+  },
+};
+
+interface TsArgs extends GlobalArgs {
+  path: string;
+}
+
+const tsCmd: CommandModule<GlobalArgs, TsArgs> = {
+  command: "ts [path]",
+  describe: "Generate typed env.ts file",
+  builder: (yargs: Argv<GlobalArgs>) =>
+    yargs.positional("path", {
+      type: "string",
+      default: "src/env.ts",
+      description: "Output path for generated file",
+    }) as Argv<TsArgs>,
+  handler: async (argv) => {
+    await tsCommand(createContext(argv), argv.path);
+  },
+};
+
+const initCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+  command: "init",
+  describe: "Initialize .env from AWS or create template",
+  handler: async (argv) => {
+    validateProjectName(argv.project, "init");
+    await checkAwsCredentials();
+    await initCommand(createContext(argv));
+  },
+};
+
+const listCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+  command: "list",
+  describe: "List all projects in env-manager namespace",
+  handler: async (argv) => {
+    await checkAwsCredentials();
+    await listCommand(createContext(argv));
+  },
+};
+
+interface NewKeyArgs extends GlobalArgs {
+  key?: string;
+  list: boolean;
+}
+
+const newKeyCmd: CommandModule<GlobalArgs, NewKeyArgs> = {
+  command: "new-key [key]",
+  describe: "Create and add API key (e.g., ANTHROPIC_API_KEY)",
+  builder: (yargs: Argv<GlobalArgs>) =>
+    yargs
+      .positional("key", {
+        type: "string",
+        description: "Key name to create",
+      })
+      .option("list", {
+        alias: "l",
+        type: "boolean",
+        default: false,
+        description: "List available keys",
+      }) as Argv<NewKeyArgs>,
+  handler: async (argv) => {
+    if (argv.list) {
+      listKeysCommand();
+      return;
+    }
+    if (!argv.key) {
+      throw new EnvManagerError(
+        "Key name required. Usage: env-manager new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys"
+      );
+    }
+    await checkAwsCredentials();
+    await newKeyCommand(createContext(argv), argv.key);
+  },
+};
+
+async function run() {
+  await yargs(hideBin(process.argv))
+    .scriptName("env-manager")
+    .usage("$0 <command> [options]")
+    .option("project", {
+      alias: "p",
+      type: "string",
+      default: basename(process.cwd()),
+      description: "Project name",
+    })
+    .option("sdk", {
+      type: "boolean",
+      default: false,
+      description: "Use AWS SDK instead of AWS CLI",
+    })
+    .command(upCmd)
+    .command(downCmd)
+    .command(tsCmd)
+    .command(initCmd)
+    .command(listCmd)
+    .command(newKeyCmd)
+    .demandCommand(1, "Please specify a command")
+    .strict()
+    .help()
+    .alias("h", "help")
+    .parse();
+}
+
+run().catch((e) => {
   if (e instanceof EnvManagerError) {
     console.error(`Error: ${e.message}`);
   } else {
