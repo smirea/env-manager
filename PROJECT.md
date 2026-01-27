@@ -35,8 +35,24 @@ utility to manage my own environment variables for all my personal projects
 
     3.5. `env-manager list` - lists all projects in `env-manager/*` namespace
 
+    3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to `.env.local`, syncs to AWS. auto-adds schema entry if missing.
+
     flags:
     - `--sdk` - use aws sdk instead of aws cli (default: aws cli)
+
+## Key Providers
+
+Providers automate API key creation via browser automation (`claude --chrome`).
+
+| Provider | Default Env Name | Key Format |
+|----------|-----------------|------------|
+| `claude` | `ANTHROPIC_API_KEY` | `sk-ant-*` |
+
+Usage:
+```bash
+env-manager new-key claude              # uses ANTHROPIC_API_KEY
+env-manager new-key claude MY_API_KEY   # uses custom env name
+```
 
 ## Schema Types
 
@@ -88,6 +104,10 @@ src/
     ts.ts
     init.ts
     list.ts
+    new-key.ts
+  providers/
+    index.ts      # provider interface and registry
+    claude.ts     # claude provider (browser automation)
   parser.ts       # .env schema parser
   validator.ts    # validation with coercion
   aws.ts          # secrets manager (cli + sdk modes)

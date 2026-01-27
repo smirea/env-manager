@@ -249,3 +249,31 @@ export function updateHeaderSyncDate(content: string, newDate: string): string {
   }
   return lines.join("\n");
 }
+
+export function appendSchemaEntry(
+  content: string,
+  name: string,
+  type: string
+): string {
+  return content.trimEnd() + `\n${name}= # {${type}}\n`;
+}
+
+export function setEnvValue(
+  content: string,
+  name: string,
+  value: string
+): string {
+  const lines = content.split("\n");
+  const idx = lines.findIndex((l) => l.startsWith(`${name}=`));
+  if (idx >= 0) {
+    lines[idx] = `${name}=${value}`;
+  } else {
+    if (lines.length > 0 && lines[lines.length - 1] === "") {
+      lines[lines.length - 1] = `${name}=${value}`;
+      lines.push("");
+    } else {
+      lines.push(`${name}=${value}`);
+    }
+  }
+  return lines.join("\n");
+}

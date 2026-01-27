@@ -5,6 +5,7 @@ import { checkAwsCredentials } from "./aws";
 import { downCommand } from "./commands/down";
 import { initCommand } from "./commands/init";
 import { listCommand } from "./commands/list";
+import { newKeyCommand } from "./commands/new-key";
 import { tsCommand } from "./commands/ts";
 import { upCommand } from "./commands/up";
 import type { CommandContext } from "./types";
@@ -14,11 +15,12 @@ const USAGE = `
 env-manager - manage environment variables with AWS Secrets Manager
 
 Commands:
-  up              Upload .env schema and .env.local values to AWS
-  down            Download .env and .env.local from AWS
-  ts [path]       Generate typed env.ts file (default: src/env.ts)
-  init            Initialize .env from AWS or create template
-  list            List all projects in env-manager namespace
+  up                            Upload .env schema and .env.local values to AWS
+  down                          Download .env and .env.local from AWS
+  ts [path]                     Generate typed env.ts file (default: src/env.ts)
+  init                          Initialize .env from AWS or create template
+  list                          List all projects in env-manager namespace
+  new-key <provider> [env_name] Create and add API key via provider (e.g., claude)
 
 Options:
   -p, --project   Project name (default: current directory name)
@@ -31,16 +33,18 @@ interface ParsedArgs {
   project: string;
   useSdk: boolean;
   path?: string;
+  args: string[];
 }
 
-function parseArgs(args: string[]): ParsedArgs {
+function parseArgs(argv: string[]): ParsedArgs {
   let command = "";
   let project = basename(process.cwd());
   let useSdk = false;
   let path: string | undefined;
+  const args: string[] = [];
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
 
     if (arg === "-h" || arg === "--help") {
       console.log(USAGE);
@@ -48,7 +52,7 @@ function parseArgs(args: string[]): ParsedArgs {
     }
 
     if (arg === "-p" || arg === "--project") {
-      project = args[++i];
+      project = argv[++i];
       if (!project) {
         throw new EnvManagerError("Missing project name after -p/--project");
       }
@@ -73,10 +77,12 @@ function parseArgs(args: string[]): ParsedArgs {
       command = arg;
     } else if (command === "ts" && !path) {
       path = arg;
+    } else {
+      args.push(arg);
     }
   }
 
-  return { command, project, useSdk, path };
+  return { command, project, useSdk, path, args };
 }
 
 async function main(): Promise<void> {
@@ -93,7 +99,7 @@ async function main(): Promise<void> {
     cwd: process.cwd(),
   };
 
-  const needsAws = ["up", "down", "init", "list"].includes(args.command);
+  const needsAws = ["up", "down", "init", "list", "new-key"].includes(args.command);
   if (needsAws) {
     await checkAwsCredentials();
   }
@@ -114,6 +120,15 @@ async function main(): Promise<void> {
     case "list":
       await listCommand(ctx);
       break;
+    case "new-key": {
+      const provider = args.args[0];
+      if (!provider) {
+        throw new EnvManagerError("Provider required. Usage: env-manager new-key <provider> [env_name]");
+      }
+      const envName = args.args[1];
+      await newKeyCommand(ctx, provider, envName);
+      break;
+    }
     default:
       throw new EnvManagerError(`Unknown command: ${args.command}`);
   }
