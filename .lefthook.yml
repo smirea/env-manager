@@ -8,3 +8,5 @@ pre-commit:
     typecheck:
       glob: "*.{ts,tsx}"
       run: bunx --bun tsgo --noEmit {staged_files}
+    test:
+      run: output=$(bun test 2>&1); code=$?; echo "$output"; [[ $code -eq 1 && "$output" == *"0 test files"* ]] && exit 0 || exit $code
