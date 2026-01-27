@@ -1,6 +1,7 @@
-﻿pre-commit:
-    commands:
-        js:
-            glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}"
-            run: bun lint --no-error-on-unmatched-pattern --no-warn-ignored --no-color {staged_files}
-            stage_fixed: true
+pre-commit:
+  parallel: true
+  commands:
+    oxlint:
+      glob: "*.{js,ts,jsx,tsx}"
+      run: bunx oxlint --fix {staged_files}
+      stage_fixed: true
