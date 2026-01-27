@@ -6,7 +6,6 @@ pre-commit:
       run: bunx oxlint --fix {staged_files}
       stage_fixed: true
     typecheck:
-      glob: "*.{ts,tsx}"
-      run: bunx --bun tsgo --noEmit {staged_files}
+      run: bunx --bun tsgo --noEmit
     test:
       run: bun test --pass-with-no-tests
