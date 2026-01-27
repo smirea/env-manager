@@ -5,7 +5,7 @@ import { checkAwsCredentials } from "./aws";
 import { downCommand } from "./commands/down";
 import { initCommand } from "./commands/init";
 import { listCommand } from "./commands/list";
-import { newKeyCommand } from "./commands/new-key";
+import { listKeysCommand, newKeyCommand } from "./commands/new-key";
 import { tsCommand } from "./commands/ts";
 import { upCommand } from "./commands/up";
 import type { CommandContext } from "./types";
@@ -15,12 +15,13 @@ const USAGE = `
 env-manager - manage environment variables with AWS Secrets Manager
 
 Commands:
-  up                            Upload .env schema and .env.local values to AWS
-  down                          Download .env and .env.local from AWS
-  ts [path]                     Generate typed env.ts file (default: src/env.ts)
-  init                          Initialize .env from AWS or create template
-  list                          List all projects in env-manager namespace
-  new-key <provider> [env_name] Create and add API key via provider (e.g., claude)
+  up                      Upload .env schema and .env.local values to AWS
+  down                    Download .env and .env.local from AWS
+  ts [path]               Generate typed env.ts file (default: src/env.ts)
+  init                    Initialize .env from AWS or create template
+  list                    List all projects in env-manager namespace
+  new-key <KEY_NAME>      Create and add API key (e.g., ANTHROPIC_API_KEY)
+  new-key --list          List available keys
 
 Options:
   -p, --project   Project name (default: current directory name)
@@ -28,12 +29,15 @@ Options:
   -h, --help      Show this help message
 `;
 
+const RESERVED_PROJECT_NAMES = ["default"];
+
 interface ParsedArgs {
   command: string;
   project: string;
   useSdk: boolean;
   path?: string;
   args: string[];
+  listFlag: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -41,6 +45,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let project = basename(process.cwd());
   let useSdk = false;
   let path: string | undefined;
+  let listFlag = false;
   const args: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -69,6 +74,11 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === "--list" || arg === "-l") {
+      listFlag = true;
+      continue;
+    }
+
     if (arg.startsWith("-")) {
       throw new EnvManagerError(`Unknown option: ${arg}`);
     }
@@ -82,7 +92,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { command, project, useSdk, path, args };
+  return { command, project, useSdk, path, args, listFlag };
 }
 
 async function main(): Promise<void> {
@@ -93,6 +103,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const commandsRestrictingDefault = ["up", "down", "init"];
+  if (
+    commandsRestrictingDefault.includes(args.command) &&
+    RESERVED_PROJECT_NAMES.includes(args.project)
+  ) {
+    throw new EnvManagerError(
+      `"${args.project}" is a reserved project name and cannot be used with ${args.command}`
+    );
+  }
+
   const ctx: CommandContext = {
     project: args.project,
     useSdk: args.useSdk,
@@ -100,7 +120,7 @@ async function main(): Promise<void> {
   };
 
   const needsAws = ["up", "down", "init", "list", "new-key"].includes(args.command);
-  if (needsAws) {
+  if (needsAws && !(args.command === "new-key" && args.listFlag)) {
     await checkAwsCredentials();
   }
 
@@ -121,12 +141,17 @@ async function main(): Promise<void> {
       await listCommand(ctx);
       break;
     case "new-key": {
-      const provider = args.args[0];
-      if (!provider) {
-        throw new EnvManagerError("Provider required. Usage: env-manager new-key <provider> [env_name]");
+      if (args.listFlag) {
+        listKeysCommand();
+        break;
       }
-      const envName = args.args[1];
-      await newKeyCommand(ctx, provider, envName);
+      const keyName = args.args[0];
+      if (!keyName) {
+        throw new EnvManagerError(
+          "Key name required. Usage: env-manager new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys"
+        );
+      }
+      await newKeyCommand(ctx, keyName);
       break;
     }
     default:

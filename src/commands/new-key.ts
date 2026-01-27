@@ -1,4 +1,5 @@
 import { createAwsAdapter, secretName } from "../aws";
+import { getKey, listKeys, listKeyNames } from "../keys";
 import {
   appendSchemaEntry,
   parseEnvFile,
@@ -6,25 +7,99 @@ import {
   setEnvValue,
   updateHeaderSyncDate,
 } from "../parser";
-import { getProvider, listProviders } from "../providers";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
 
-export async function newKeyCommand(
-  ctx: CommandContext,
-  provider: string,
-  envName?: string
+const DEFAULT_PROJECT = "default";
+
+async function promptChoice(question: string, options: string[]): Promise<number> {
+  console.log(question);
+  options.forEach((opt, i) => console.log(`  [${i + 1}] ${opt}`));
+  process.stdout.write("Choice: ");
+
+  for await (const line of console) {
+    const choice = parseInt(line.trim(), 10);
+    if (choice >= 1 && choice <= options.length) {
+      return choice;
+    }
+    process.stdout.write("Invalid choice. Try again: ");
+  }
+  throw new EnvManagerError("No input received");
+}
+
+export function listKeysCommand(): void {
+  const keys = listKeys();
+  console.log("Available keys:");
+  const maxLen = Math.max(...keys.map((k) => k.envName.length));
+  for (const key of keys) {
+    console.log(`  ${key.envName.padEnd(maxLen + 2)}${key.description}`);
+  }
+}
+
+async function getDefaultValue(
+  aws: ReturnType<typeof createAwsAdapter>,
+  keyName: string
+): Promise<string | null> {
+  const secret = await aws.getSecret(secretName(DEFAULT_PROJECT));
+  if (!secret?.values) return null;
+
+  const values = parseEnvValues(secret.values);
+  return values[keyName] ?? null;
+}
+
+async function saveToDefault(
+  aws: ReturnType<typeof createAwsAdapter>,
+  keyName: string,
+  keyValue: string,
+  schemaType: string
 ): Promise<void> {
-  const prov = getProvider(provider);
-  if (!prov) {
-    const available = listProviders().join(", ");
-    throw new EnvManagerError(
-      `Unknown provider: ${provider}. Available: ${available}`
-    );
+  let secret = await aws.getSecret(secretName(DEFAULT_PROJECT));
+
+  const now = new Date().toISOString();
+
+  if (!secret) {
+    const header = `#env-manager: ${DEFAULT_PROJECT} | ${now}\n\n`;
+    secret = {
+      schema: header + `${keyName}= # {${schemaType}}\n`,
+      values: `${keyName}=${keyValue}`,
+      syncDate: now,
+    };
+  } else {
+    let schema = secret.schema;
+    const parsed = parseEnvFile(schema);
+    const existsInSchema = parsed.schema.some((s) => s.name === keyName);
+    if (!existsInSchema) {
+      schema = appendSchemaEntry(schema, keyName, schemaType);
+    }
+    schema = updateHeaderSyncDate(schema, now);
+
+    const values = parseEnvValues(secret.values);
+    values[keyName] = keyValue;
+
+    secret = {
+      schema,
+      values: Object.entries(values)
+        .map(([k, v]) => `${k}=${v}`)
+        .join("\n"),
+      syncDate: now,
+    };
   }
 
-  const varName = envName ?? prov.defaultEnvName;
+  await aws.putSecret(secretName(DEFAULT_PROJECT), secret);
+}
+
+export async function newKeyCommand(
+  ctx: CommandContext,
+  keyName: string
+): Promise<void> {
+  const keyDef = getKey(keyName);
+  if (!keyDef) {
+    const available = listKeyNames().join(", ");
+    throw new EnvManagerError(
+      `Unknown key: ${keyName}. Available: ${available}`
+    );
+  }
 
   const envPath = `${ctx.cwd}/.env`;
   const localPath = `${ctx.cwd}/.env.local`;
@@ -45,18 +120,38 @@ export async function newKeyCommand(
     );
   }
 
-  const existsInSchema = parsed.schema.some((s) => s.name === varName);
+  const existsInSchema = parsed.schema.some((s) => s.name === keyName);
   if (!existsInSchema) {
-    console.log(`Adding ${varName} to .env schema...`);
-    envContent = appendSchemaEntry(envContent, varName, prov.schemaType);
+    console.log(`Adding ${keyName} to .env schema...`);
+    envContent = appendSchemaEntry(envContent, keyName, keyDef.schemaType);
   }
 
-  console.log(`Creating ${varName} via ${provider}...`);
-  const key = await prov.resolveKey(ctx.project);
+  const aws = createAwsAdapter(ctx.useSdk);
+  const defaultValue = await getDefaultValue(aws, keyName);
 
-  if (!prov.validateKey(key)) {
+  let key: string;
+
+  if (defaultValue) {
+    const choice = await promptChoice(`${keyName} found in /default`, [
+      "Use existing from /default",
+      "Create new key",
+    ]);
+
+    if (choice === 1) {
+      key = defaultValue;
+      console.log(`Using ${keyName} from /default`);
+    } else {
+      console.log(`Creating new ${keyName}...`);
+      key = await keyDef.resolve(ctx.project);
+    }
+  } else {
+    console.log(`Creating ${keyName}...`);
+    key = await keyDef.resolve(ctx.project);
+  }
+
+  if (!keyDef.validate(key)) {
     throw new EnvManagerError(
-      `Provider returned invalid key format. Got: ${key.slice(0, 20)}...`
+      `Invalid key format. Got: ${key.slice(0, 20)}...`
     );
   }
 
@@ -65,7 +160,7 @@ export async function newKeyCommand(
   if (await localFile.exists()) {
     localContent = await localFile.text();
   }
-  localContent = setEnvValue(localContent, varName, key);
+  localContent = setEnvValue(localContent, keyName, key);
 
   await Bun.write(envPath, envContent);
   await Bun.write(localPath, localContent);
@@ -78,7 +173,6 @@ export async function newKeyCommand(
   const now = new Date().toISOString();
   envContent = updateHeaderSyncDate(envContent, now);
 
-  const aws = createAwsAdapter(ctx.useSdk);
   const payload: SecretPayload = {
     schema: envContent,
     values: Object.entries(values)
@@ -90,5 +184,10 @@ export async function newKeyCommand(
   await aws.putSecret(secretName(ctx.project), payload);
   await Bun.write(envPath, envContent);
 
-  console.log(`Added ${varName} and synced to AWS`);
+  if (!defaultValue || key !== defaultValue) {
+    await saveToDefault(aws, keyName, key, keyDef.schemaType);
+    console.log(`Saved ${keyName} to /default`);
+  }
+
+  console.log(`Added ${keyName} and synced to AWS`);
 }

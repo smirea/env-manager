@@ -1,19 +1,19 @@
-import type { KeyProvider } from "./index";
+import type { KeyDefinition } from "./index";
 
 function isValidAnthropicKey(key: string): boolean {
   return /^sk-ant-[a-zA-Z0-9-_]+$/.test(key);
 }
 
-export const claudeProvider: KeyProvider = {
-  name: "claude",
-  defaultEnvName: "ANTHROPIC_API_KEY",
-  schemaType: "string",
+export const anthropicKey: KeyDefinition = {
+  envName: "ANTHROPIC_API_KEY",
+  description: "Anthropic/Claude API key for AI services",
+  schemaType: "string:format(/^sk-ant-/)",
 
-  validateKey(key: string): boolean {
+  validate(key: string): boolean {
     return isValidAnthropicKey(key);
   },
 
-  async resolveKey(projectName: string): Promise<string> {
+  async resolve(projectName: string): Promise<string> {
     const prompt = `go to https://platform.claude.com/settings/keys and create a new API key under the "local" workspace with the name "${projectName}". Return ONLY the key value, nothing else.`;
 
     const result = await Bun.$`claude --chrome ${prompt}`.text();

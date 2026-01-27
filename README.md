@@ -24,6 +24,8 @@ env-manager <command> [options]
 | `down` | Download `.env` and `.env.local` from AWS |
 | `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
 | `list` | List all projects in `env-manager/*` namespace |
+| `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`) |
+| `new-key --list` | List available keys |
 
 ### Options
 
@@ -64,6 +66,34 @@ RATE_LIMIT=0.5
 
 All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
+## Global Defaults
+
+The `/default` project stores shared API keys that can be reused across projects.
+
+### Adding a key
+
+```bash
+env-manager new-key ANTHROPIC_API_KEY
+```
+
+If the key exists in `/default`, you'll be prompted:
+```
+ANTHROPIC_API_KEY found in /default
+  [1] Use existing from /default
+  [2] Create new key
+Choice:
+```
+
+New keys are automatically saved to both your current project and `/default` for future reuse.
+
+### Available keys
+
+```bash
+env-manager new-key --list
+```
+
+Shows all supported keys with descriptions.
+
 ## Workflow
 
 ### 1. Initialize a project
@@ -73,6 +103,14 @@ env-manager init
 ```
 
 Creates `.env` from AWS if the project exists, otherwise creates a new template.
+
+If `/default` contains keys, you'll be prompted to copy them:
+```
+Found 1 key(s) in /default:
+  - ANTHROPIC_API_KEY
+
+Use ANTHROPIC_API_KEY from /default? (Y/n):
+```
 
 ### 2. Define your schema
 
