@@ -6,8 +6,8 @@ import {
   parseHeader,
   parseSchemaComment,
   parseValidators,
-} from "./src/parser";
-import type { FormatValidator } from "./src/types";
+} from "./parser";
+import type { FormatValidator } from "./types";
 
 describe("parseHeader", () => {
   test("parses valid header", () => {
