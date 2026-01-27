@@ -155,6 +155,7 @@ async function run() {
     .command(newKeyCmd)
     .demandCommand(1, "Please specify a command")
     .strict()
+    .version(false)
     .help()
     .alias("h", "help")
     .parse();
