@@ -83,6 +83,10 @@ describe("parseSchemaComment", () => {
     expect(parseSchemaComment("# {email}")?.type).toBe("email");
   });
 
+  test("parses file type", () => {
+    expect(parseSchemaComment("# {file}")?.type).toBe("file");
+  });
+
   test("parses optional with validators", () => {
     const result = parseSchemaComment("# {optional int:min(3000),max(10000)}");
     expect(result).toEqual({

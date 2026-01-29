@@ -1,4 +1,11 @@
-export type SchemaType = "string" | "int" | "float" | "bool" | "url" | "email";
+export type SchemaType =
+  | "string"
+  | "int"
+  | "float"
+  | "bool"
+  | "url"
+  | "email"
+  | "file";
 
 export type MinValidator = { kind: "min"; value: number };
 export type MaxValidator = { kind: "max"; value: number };
@@ -31,6 +38,7 @@ export interface SecretPayload {
   schema: string;
   values: string;
   syncDate: string;
+  files?: Record<string, string>;
 }
 
 export interface CommandContext {

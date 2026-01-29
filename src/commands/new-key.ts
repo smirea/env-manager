@@ -1,4 +1,5 @@
 import { createAwsAdapter, secretName } from "../aws";
+import { collectFilePayload } from "../file-sync";
 import { getKey, listKeys, listKeyNames } from "../keys";
 import {
   appendSchemaEntry,
@@ -83,6 +84,7 @@ async function saveToDefault(
         .map(([k, v]) => `${k}=${v}`)
         .join("\n"),
       syncDate: now,
+      files: secret.files,
     };
   }
 
@@ -170,6 +172,8 @@ export async function newKeyCommand(
   const result = validateEnv(updatedParsed.schema, values);
   assertValid(result);
 
+  const files = await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
+
   const now = new Date().toISOString();
   envContent = updateHeaderSyncDate(envContent, now);
 
@@ -179,6 +183,7 @@ export async function newKeyCommand(
       .map(([k, v]) => `${k}=${v}`)
       .join("\n"),
     syncDate: now,
+    files: Object.keys(files).length > 0 ? files : undefined,
   };
 
   await aws.putSecret(secretName(ctx.project), payload);

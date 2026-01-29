@@ -1,4 +1,5 @@
 import { createAwsAdapter, secretName } from "../aws";
+import { collectFilePayload } from "../file-sync";
 import { parseEnvFile, parseEnvValues, updateHeaderSyncDate } from "../parser";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
@@ -44,6 +45,8 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   const result = validateEnv(parsed.schema, values);
   assertValid(result);
 
+  const files = await collectFilePayload(parsed.schema, values, ctx.cwd);
+
   envContent = updateHeaderSyncDate(envContent, now);
 
   const payload: SecretPayload = {
@@ -52,6 +55,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
       .map(([k, v]) => `${k}=${v}`)
       .join("\n"),
     syncDate: now,
+    files: Object.keys(files).length > 0 ? files : undefined,
   };
 
   await aws.putSecret(secretName(ctx.project), payload);

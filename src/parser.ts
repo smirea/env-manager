@@ -56,7 +56,7 @@ export function parseSchemaComment(comment: string): {
 
   const inner = match[1].trim();
   const typeMatch = inner.match(
-    /^(optional\s+)?(string|int|float|bool|url|email)(?::(.+))?$/
+    /^(optional\s+)?(string|int|float|bool|url|email|file)(?::(.+))?$/
   );
   if (!typeMatch) return null;
 

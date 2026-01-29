@@ -1,4 +1,5 @@
 import { createAwsAdapter, secretName } from "../aws";
+import { writeFilesFromPayload } from "../file-sync";
 import { parseEnvFile, parseEnvValues, updateHeaderSyncDate } from "../parser";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
@@ -22,6 +23,8 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
 
   const result = validateEnv(parsed.schema, values);
   assertValid(result);
+
+  await writeFilesFromPayload(parsed.schema, values, secret.files, ctx.cwd);
 
   const now = new Date().toISOString();
   const updatedSchema = updateHeaderSyncDate(secret.schema, now);

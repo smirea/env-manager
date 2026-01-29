@@ -15,6 +15,7 @@ export function coerceValue(
     case "string":
     case "url":
     case "email":
+    case "file":
       return value;
     case "int": {
       const n = parseInt(value, 10);

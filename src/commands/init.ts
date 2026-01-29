@@ -1,7 +1,9 @@
 import { createAwsAdapter, secretName } from "../aws";
+import { writeFilesFromPayload } from "../file-sync";
 import { parseEnvFile, parseEnvValues, setEnvValue } from "../parser";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
+import { assertValid, validateEnv } from "../validator";
 
 const DEFAULT_PROJECT = "default";
 
@@ -42,6 +44,11 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
   const secret = await aws.getSecret(secretName(ctx.project));
 
   if (secret) {
+    const parsed = parseEnvFile(secret.schema);
+    const values = parseEnvValues(secret.values ?? "");
+    const result = validateEnv(parsed.schema, values);
+    assertValid(result);
+    await writeFilesFromPayload(parsed.schema, values, secret.files, ctx.cwd);
     await Bun.write(envPath, secret.schema);
     if (secret.values) {
       await Bun.write(localPath, secret.values);

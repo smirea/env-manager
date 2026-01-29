@@ -35,6 +35,9 @@ function generateZodField(s: EnvVarSchema): string {
     case "email":
       chain = "z.string().email()";
       break;
+    case "file":
+      chain = "z.string()";
+      break;
   }
 
   for (const v of s.validators) {

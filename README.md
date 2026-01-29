@@ -63,8 +63,11 @@ RATE_LIMIT=0.5
 | `bool` | - | `# {bool}` |
 | `url` | - | `# {url}` |
 | `email` | - | `# {email}` |
+| `file` | - | `# {file}` |
 
 All types can be prefixed with `optional` (e.g., `# {optional string}`).
+
+`file` values are file paths. On sync, file contents are stored in the secret and written back to the same path when downloading.
 
 ## Global Defaults
 
