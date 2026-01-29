@@ -14,12 +14,24 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   }
 
   let envContent = await envFile.text();
-  const parsed = parseEnvFile(envContent);
+  let parsed = parseEnvFile(envContent);
+
+  const aws = createAwsAdapter(ctx.useSdk);
+  const now = new Date().toISOString();
 
   if (!parsed.header) {
-    throw new EnvManagerError(
-      ".env is missing env-manager header. Run: env-manager init"
-    );
+    const secret = await aws.getSecret(secretName(ctx.project));
+    if (secret) {
+      throw new EnvManagerError(
+        ".env is missing env-manager header. Run: env-manager init"
+      );
+    }
+
+    const header = `#env-manager: ${ctx.project} | ${now}`;
+    envContent = `${header}\n\n${envContent}`;
+    await Bun.write(envPath, envContent);
+    console.log(`Added env-manager header to ${envPath}`);
+    parsed = parseEnvFile(envContent);
   }
 
   let values: Record<string, string> = {};
@@ -32,10 +44,8 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   const result = validateEnv(parsed.schema, values);
   assertValid(result);
 
-  const now = new Date().toISOString();
   envContent = updateHeaderSyncDate(envContent, now);
 
-  const aws = createAwsAdapter(ctx.useSdk);
   const payload: SecretPayload = {
     schema: envContent,
     values: Object.entries(values)
