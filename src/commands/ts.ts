@@ -83,6 +83,12 @@ export async function tsCommand(
   const content = await envFile.text();
   const parsed = parseEnvFile(content);
 
+  if (parsed.header && parsed.header.project !== ctx.project) {
+    throw new EnvManagerError(
+      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
+    );
+  }
+
   if (parsed.schema.length === 0) {
     throw new EnvManagerError(
       "No schema found in .env. Add schema comments like: # {string}"

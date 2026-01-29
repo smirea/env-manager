@@ -71,6 +71,28 @@ export function parseSchemaComment(comment: string): {
   };
 }
 
+function findInlineCommentIndex(value: string): number {
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (ch === "#" && !inSingle && !inDouble) {
+      if (i === 0 || /\s/.test(value[i - 1])) return i;
+    }
+  }
+
+  return -1;
+}
+
 function parseEnvLine(line: string): {
   name: string;
   value: string | null;
@@ -85,15 +107,7 @@ function parseEnvLine(line: string): {
   let value: string | null = null;
   let inlineComment: string | null = null;
 
-  // Look for comment: either starts with # or has " #" somewhere
-  let commentIdx = -1;
-  if (rest.trimStart().startsWith("#")) {
-    commentIdx = rest.indexOf("#");
-  } else {
-    commentIdx = rest.indexOf(" #");
-    if (commentIdx !== -1) commentIdx++; // skip the space, point to #
-  }
-
+  const commentIdx = findInlineCommentIndex(rest);
   if (commentIdx !== -1) {
     inlineComment = rest.slice(commentIdx);
     rest = rest.slice(0, commentIdx);
@@ -187,7 +201,12 @@ export function parseEnvValues(content: string): EnvValues {
     if (!match) continue;
 
     const name = match[1];
-    let value = match[2].trim();
+    let value = match[2];
+    const commentIdx = findInlineCommentIndex(value);
+    if (commentIdx !== -1) {
+      value = value.slice(0, commentIdx);
+    }
+    value = value.trim();
 
     if (
       (value.startsWith("'") && value.endsWith("'")) ||

@@ -121,6 +121,11 @@ export async function newKeyCommand(
       ".env is missing env-manager header. Run: env-manager init"
     );
   }
+  if (parsed.header.project !== ctx.project) {
+    throw new EnvManagerError(
+      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
+    );
+  }
 
   const existsInSchema = parsed.schema.some((s) => s.name === keyName);
   if (!existsInSchema) {

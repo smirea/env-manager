@@ -17,6 +17,12 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   let envContent = await envFile.text();
   let parsed = parseEnvFile(envContent);
 
+  if (parsed.header && parsed.header.project !== ctx.project) {
+    throw new EnvManagerError(
+      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
+    );
+  }
+
   const aws = createAwsAdapter();
   const now = new Date().toISOString();
 

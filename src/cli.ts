@@ -14,12 +14,18 @@ import type { CommandContext } from "./types";
 import { EnvManagerError } from "./types";
 
 const RESERVED_PROJECT_NAMES = ["default"];
+const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
 
 interface GlobalArgs {
   project: string;
 }
 
 function validateProjectName(project: string, command: string): void {
+  if (!PROJECT_NAME_PATTERN.test(project)) {
+    throw new EnvManagerError(
+      `Invalid project name "${project}". Project names cannot include spaces or "|".`
+    );
+  }
   const commandsRestrictingDefault = ["up", "down", "init"];
   if (
     commandsRestrictingDefault.includes(command) &&

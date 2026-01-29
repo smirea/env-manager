@@ -237,6 +237,13 @@ BAR="double quoted" # {string}
     expect(result.schema[1].defaultValue).toBe("double quoted");
   });
 
+  test("ignores inline comments inside quotes", () => {
+    const content = `FOO="hash#inside" # {string}
+`;
+    const result = parseEnvFile(content);
+    expect(result.schema[0].defaultValue).toBe("hash#inside");
+  });
+
   test("handles empty file", () => {
     const result = parseEnvFile("");
     expect(result.header).toBeNull();
@@ -294,5 +301,17 @@ FOO=bar
 BAZ=qux
 `);
     expect(result).toEqual({ FOO: "bar", BAZ: "qux" });
+  });
+
+  test("strips inline comments outside quotes", () => {
+    const result = parseEnvValues(`FOO=bar # comment
+BAR="hash#inside" # keep
+BAZ=qux#not-comment
+`);
+    expect(result).toEqual({
+      FOO: "bar",
+      BAR: "hash#inside",
+      BAZ: "qux#not-comment",
+    });
   });
 });
