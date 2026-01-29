@@ -72,6 +72,7 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 - every command validates before executing
 - CLI uses custom parser to extract schema from `.env` comments
 - CLI coerces values (string → int/float/bool) and throws on validation failure
+- defaults are always applied when present, even on optional keys
 - latest update is source of truth (up overwrites remote, down overwrites local)
 
 ## Generated TypeScript (env-manager ts)

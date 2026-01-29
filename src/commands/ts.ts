@@ -46,6 +46,10 @@ function generateZodField(s: EnvVarSchema): string {
     if (v.kind === "format") chain += `.regex(${v.pattern.toString()})`;
   }
 
+  if (s.optional) {
+    chain += ".optional()";
+  }
+
   if (s.defaultValue !== null) {
     let defaultVal: string;
     if (s.type === "int" || s.type === "float") {
@@ -59,10 +63,6 @@ function generateZodField(s: EnvVarSchema): string {
       defaultVal = JSON.stringify(s.defaultValue);
     }
     chain += `.default(${defaultVal})`;
-  }
-
-  if (s.optional) {
-    chain += ".optional()";
   }
 
   return `  ${s.name}: ${chain},`;
