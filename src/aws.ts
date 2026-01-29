@@ -1,11 +1,3 @@
-import {
-  CreateSecretCommand,
-  GetSecretValueCommand,
-  ListSecretsCommand,
-  PutSecretValueCommand,
-  ResourceNotFoundException,
-  SecretsManagerClient,
-} from "@aws-sdk/client-secrets-manager";
 import type { SecretPayload } from "./types";
 import { AwsError } from "./types";
 
@@ -90,79 +82,8 @@ export class AwsCliAdapter implements AwsAdapter {
   }
 }
 
-export class AwsSdkAdapter implements AwsAdapter {
-  private client: SecretsManagerClient;
-
-  constructor() {
-    this.client = new SecretsManagerClient({});
-  }
-
-  async getSecret(name: string): Promise<SecretPayload | null> {
-    try {
-      const response = await this.client.send(
-        new GetSecretValueCommand({ SecretId: name })
-      );
-      if (!response.SecretString) {
-        throw new AwsError(`Secret ${name} has no string value`);
-      }
-      return JSON.parse(response.SecretString) as SecretPayload;
-    } catch (e) {
-      if (e instanceof ResourceNotFoundException) {
-        return null;
-      }
-      throw new AwsError(
-        `Failed to get secret: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }
-
-  async putSecret(name: string, payload: SecretPayload): Promise<void> {
-    const json = JSON.stringify(payload);
-    const existing = await this.getSecret(name);
-
-    try {
-      if (existing) {
-        await this.client.send(
-          new PutSecretValueCommand({
-            SecretId: name,
-            SecretString: json,
-          })
-        );
-      } else {
-        await this.client.send(
-          new CreateSecretCommand({
-            Name: name,
-            SecretString: json,
-          })
-        );
-      }
-    } catch (e) {
-      throw new AwsError(
-        `Failed to put secret: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }
-
-  async listSecrets(prefix: string): Promise<string[]> {
-    try {
-      const response = await this.client.send(
-        new ListSecretsCommand({
-          Filters: [{ Key: "name", Values: [prefix] }],
-        })
-      );
-      return (response.SecretList ?? [])
-        .map((s) => s.Name)
-        .filter((n): n is string => n !== undefined && n.startsWith(prefix));
-    } catch (e) {
-      throw new AwsError(
-        `Failed to list secrets: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }
-}
-
-export function createAwsAdapter(useSdk: boolean): AwsAdapter {
-  return useSdk ? new AwsSdkAdapter() : new AwsCliAdapter();
+export function createAwsAdapter(): AwsAdapter {
+  return new AwsCliAdapter();
 }
 
 export async function checkAwsCredentials(): Promise<void> {

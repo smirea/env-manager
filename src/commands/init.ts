@@ -40,7 +40,7 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
     );
   }
 
-  const aws = createAwsAdapter(ctx.useSdk);
+  const aws = createAwsAdapter();
   const secret = await aws.getSecret(secretName(ctx.project));
 
   if (secret) {

@@ -1,8 +1,8 @@
 import { createAwsAdapter } from "../aws";
 import type { CommandContext } from "../types";
 
-export async function listCommand(ctx: CommandContext): Promise<void> {
-  const aws = createAwsAdapter(ctx.useSdk);
+export async function listCommand(_ctx: CommandContext): Promise<void> {
+  const aws = createAwsAdapter();
   const secrets = await aws.listSecrets("env-manager/");
 
   if (secrets.length === 0) {

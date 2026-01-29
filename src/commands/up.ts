@@ -17,7 +17,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   let envContent = await envFile.text();
   let parsed = parseEnvFile(envContent);
 
-  const aws = createAwsAdapter(ctx.useSdk);
+  const aws = createAwsAdapter();
   const now = new Date().toISOString();
 
   if (!parsed.header) {

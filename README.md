@@ -32,7 +32,6 @@ env-manager <command> [options]
 | Option | Description |
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: current directory name) |
-| `--sdk` | Use AWS SDK instead of AWS CLI |
 | `-h, --help` | Show help message |
 
 ## Schema Format
@@ -170,7 +169,7 @@ env-manager down
 
 ## AWS Configuration
 
-The CLI uses the standard AWS credential chain. Configure with:
+The CLI uses the AWS CLI credential chain. Configure with:
 
 ```bash
 aws configure

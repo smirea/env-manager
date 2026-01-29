@@ -128,7 +128,7 @@ export async function newKeyCommand(
     envContent = appendSchemaEntry(envContent, keyName, keyDef.schemaType);
   }
 
-  const aws = createAwsAdapter(ctx.useSdk);
+  const aws = createAwsAdapter();
   const defaultValue = await getDefaultValue(aws, keyName);
 
   let key: string;

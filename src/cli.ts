@@ -17,7 +17,6 @@ const RESERVED_PROJECT_NAMES = ["default"];
 
 interface GlobalArgs {
   project: string;
-  sdk: boolean;
 }
 
 function validateProjectName(project: string, command: string): void {
@@ -35,7 +34,6 @@ function validateProjectName(project: string, command: string): void {
 function createContext(argv: GlobalArgs): CommandContext {
   return {
     project: argv.project,
-    useSdk: argv.sdk,
     cwd: process.cwd(),
   };
 }
@@ -141,11 +139,6 @@ async function run() {
       type: "string",
       default: basename(process.cwd()),
       description: "Project name",
-    })
-    .option("sdk", {
-      type: "boolean",
-      default: false,
-      description: "Use AWS SDK instead of AWS CLI",
     })
     .command(upCmd)
     .command(downCmd)

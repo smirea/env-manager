@@ -9,7 +9,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
   const localPath = `${ctx.cwd}/.env.local`;
 
-  const aws = createAwsAdapter(ctx.useSdk);
+  const aws = createAwsAdapter();
   const secret = await aws.getSecret(secretName(ctx.project));
 
   if (!secret) {

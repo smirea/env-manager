@@ -38,7 +38,7 @@ utility to manage my own environment variables for all my personal projects
     3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to `.env.local`, syncs to AWS. auto-adds schema entry if missing.
 
     flags:
-    - `--sdk` - use aws sdk instead of aws cli (default: aws cli)
+    - none
 
 ## Key Providers
 
@@ -110,7 +110,7 @@ src/
     claude.ts     # claude provider (browser automation)
   parser.ts       # .env schema parser
   validator.ts    # validation with coercion
-  aws.ts          # secrets manager (cli + sdk modes)
+  aws.ts          # secrets manager (aws cli only)
 parser.test.ts    # bun test for parser
 ```
 

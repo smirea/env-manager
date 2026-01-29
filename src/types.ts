@@ -43,7 +43,6 @@ export interface SecretPayload {
 
 export interface CommandContext {
   project: string;
-  useSdk: boolean;
   cwd: string;
 }
 
