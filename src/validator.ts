@@ -11,25 +11,35 @@ export function coerceValue(
   value: string,
   type: EnvVarSchema["type"]
 ): string | number | boolean {
+  const trimmed = value.trim();
   switch (type) {
     case "string":
     case "url":
     case "email":
     case "file":
-      return value;
+      return trimmed;
     case "int": {
-      const n = parseInt(value, 10);
-      if (isNaN(n)) throw new EnvManagerError(`Cannot parse "${value}" as int`);
+      if (!/^[+-]?\d+$/.test(trimmed)) {
+        throw new EnvManagerError(`Cannot parse "${value}" as int`);
+      }
+      const n = Number(trimmed);
+      if (!Number.isSafeInteger(n)) {
+        throw new EnvManagerError(`Cannot parse "${value}" as int`);
+      }
       return n;
     }
     case "float": {
-      const n = parseFloat(value);
-      if (isNaN(n))
+      if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(trimmed)) {
         throw new EnvManagerError(`Cannot parse "${value}" as float`);
+      }
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) {
+        throw new EnvManagerError(`Cannot parse "${value}" as float`);
+      }
       return n;
     }
     case "bool": {
-      const lower = value.toLowerCase();
+      const lower = trimmed.toLowerCase();
       if (["true", "1", "yes", "on"].includes(lower)) return true;
       if (["false", "0", "no", "off", ""].includes(lower)) return false;
       throw new EnvManagerError(`Cannot parse "${value}" as bool`);
@@ -80,6 +90,9 @@ export function runValidators(
           message: `format() validator requires string type`,
           value: String(value),
         };
+      }
+      if (v.pattern.global || v.pattern.sticky) {
+        v.pattern.lastIndex = 0;
       }
       if (!v.pattern.test(value)) {
         return {
