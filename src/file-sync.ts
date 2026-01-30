@@ -14,6 +14,21 @@ function getFilePathValue(
   return values[schema.name] ?? schema.defaultValue;
 }
 
+async function readUtf8File(
+  file: { arrayBuffer: () => Promise<ArrayBuffer> },
+  name: string,
+  fullPath: string
+): Promise<string> {
+  try {
+    const data = await file.arrayBuffer();
+    return new TextDecoder("utf-8", { fatal: true }).decode(data);
+  } catch {
+    throw new EnvManagerError(
+      `File for ${name} is not valid UTF-8: ${fullPath}`
+    );
+  }
+}
+
 export async function collectFilePayload(
   schema: EnvVarSchema[],
   values: EnvValues,
@@ -38,7 +53,7 @@ export async function collectFilePayload(
       );
     }
 
-    files[s.name] = await file.text();
+    files[s.name] = await readUtf8File(file, s.name, fullPath);
   }
 
   return files;

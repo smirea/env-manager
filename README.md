@@ -66,7 +66,7 @@ RATE_LIMIT=0.5
 
 All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
-`file` values are file paths. On sync, file contents are stored in the secret and written back to the same path when downloading.
+`file` values are file paths. On sync, file contents are stored in the secret and written back to the same path when downloading. Files must be valid UTF-8 text (binary files are rejected).
 
 ## Global Defaults
 

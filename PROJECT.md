@@ -77,6 +77,7 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 - project names cannot contain spaces or "|" and headers must match `--project`
 - validator parsing is strict and rejects unknown or invalid validators
 - header detection tolerates leading non-schema comments before the header
+- file sync only supports UTF-8 text; binary files are rejected
 - latest update is source of truth (up overwrites remote, down overwrites local)
 
 ## Generated TypeScript (env-manager ts)

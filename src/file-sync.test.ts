@@ -60,6 +60,16 @@ describe("file sync", () => {
     });
   });
 
+  test("collectFilePayload throws on non-utf8 file", async () => {
+    await withTempDir(async (dir) => {
+      const binary = Buffer.from([0xff, 0xfe, 0xfd]);
+      await writeFile(path.join(dir, "cert.pem"), binary);
+      await expect(
+        collectFilePayload([fileSchema()], { CERT: "cert.pem" }, dir)
+      ).rejects.toThrow(EnvManagerError);
+    });
+  });
+
   test("writeFilesFromPayload writes files to target path", async () => {
     await withTempDir(async (dir) => {
       await writeFilesFromPayload(
