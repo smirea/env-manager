@@ -15,6 +15,21 @@ import { EnvManagerError } from "./types";
 
 const RESERVED_PROJECT_NAMES = ["default"];
 const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
+const SUPPORTED_SCHEMA_TYPES = [
+  "string",
+  "int",
+  "float",
+  "bool",
+  "url",
+  "email",
+  "file",
+];
+const SUPPORTED_SCHEMA_VALIDATORS = ["min(n)", "max(n)", "format(/regex/)"];
+const HELP_FOOTER = `Supported schema formats:
+  Types: ${SUPPORTED_SCHEMA_TYPES.join(", ")}
+  Validators: ${SUPPORTED_SCHEMA_VALIDATORS.join(", ")}
+  Optional: prefix any type with "optional"
+  Example: # {optional string:format(/^sk-/)}`;
 
 interface GlobalArgs {
   project: string;
@@ -46,7 +61,8 @@ function createContext(argv: GlobalArgs): CommandContext {
 
 const upCmd: CommandModule<GlobalArgs, GlobalArgs> = {
   command: "up",
-  describe: "Upload .env schema and .env.local values to AWS",
+  describe:
+    "Validate schema + values, then upload .env schema, .env.local values, and file payloads to AWS",
   handler: async (argv) => {
     validateProjectName(argv.project, "up");
     await checkAwsCredentials();
@@ -56,7 +72,8 @@ const upCmd: CommandModule<GlobalArgs, GlobalArgs> = {
 
 const downCmd: CommandModule<GlobalArgs, GlobalArgs> = {
   command: "down",
-  describe: "Download .env and .env.local from AWS",
+  describe:
+    "Download schema + values from AWS, validate them, and write .env/.env.local files",
   handler: async (argv) => {
     validateProjectName(argv.project, "down");
     await checkAwsCredentials();
@@ -70,7 +87,8 @@ interface TsArgs extends GlobalArgs {
 
 const tsCmd: CommandModule<GlobalArgs, TsArgs> = {
   command: "ts [path]",
-  describe: "Generate typed env.ts file",
+  describe:
+    "Generate a Zod-validated env.ts from the .env schema for typed access",
   builder: (yargs: Argv<GlobalArgs>) =>
     yargs.positional("path", {
       type: "string",
@@ -84,7 +102,8 @@ const tsCmd: CommandModule<GlobalArgs, TsArgs> = {
 
 const initCmd: CommandModule<GlobalArgs, GlobalArgs> = {
   command: "init",
-  describe: "Initialize .env from AWS or create template",
+  describe:
+    "Initialize .env from AWS if it exists, otherwise create a new template",
   handler: async (argv) => {
     validateProjectName(argv.project, "init");
     await checkAwsCredentials();
@@ -94,7 +113,8 @@ const initCmd: CommandModule<GlobalArgs, GlobalArgs> = {
 
 const listCmd: CommandModule<GlobalArgs, GlobalArgs> = {
   command: "list",
-  describe: "List all projects in env-manager namespace",
+  describe:
+    "List all projects stored under the env-manager/<project> Secrets Manager namespace",
   handler: async (argv) => {
     await checkAwsCredentials();
     await listCommand(createContext(argv));
@@ -108,18 +128,19 @@ interface NewKeyArgs extends GlobalArgs {
 
 const newKeyCmd: CommandModule<GlobalArgs, NewKeyArgs> = {
   command: "new-key [key]",
-  describe: "Create and add API key (e.g., ANTHROPIC_API_KEY)",
+  describe:
+    "Create or reuse a known API key, add it to .env/.env.local, and sync to AWS",
   builder: (yargs: Argv<GlobalArgs>) =>
     yargs
       .positional("key", {
         type: "string",
-        description: "Key name to create",
+        description: "Known key name to create (e.g., ANTHROPIC_API_KEY)",
       })
       .option("list", {
         alias: "l",
         type: "boolean",
         default: false,
-        description: "List available keys",
+        description: "List supported keys and exit",
       }) as Argv<NewKeyArgs>,
   handler: async (argv) => {
     if (argv.list) {
@@ -139,7 +160,9 @@ const newKeyCmd: CommandModule<GlobalArgs, NewKeyArgs> = {
 async function run() {
   await yargs(hideBin(process.argv))
     .scriptName("env-manager")
-    .usage("$0 <command> [options]")
+    .usage(
+      "$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync."
+    )
     .option("project", {
       alias: "p",
       type: "string",
@@ -155,6 +178,7 @@ async function run() {
     .demandCommand(1, "Please specify a command")
     .strict()
     .version(false)
+    .epilog(HELP_FOOTER)
     .help()
     .alias("h", "help")
     .parse();
