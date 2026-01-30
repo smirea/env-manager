@@ -75,6 +75,7 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 - defaults are always applied when present, even on optional keys
 - int/float parsing is strict (no trailing junk), regex validators reset state
 - project names cannot contain spaces or "|" and headers must match `--project`
+- validator parsing is strict and rejects unknown or invalid validators
 - latest update is source of truth (up overwrites remote, down overwrites local)
 
 ## Generated TypeScript (env-manager ts)

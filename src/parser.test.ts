@@ -150,6 +150,19 @@ describe("parseValidators", () => {
   test("returns empty array for empty string", () => {
     expect(parseValidators("", "string")).toEqual([]);
   });
+
+  test("throws on unknown validator", () => {
+    expect(() => parseValidators("unknown(1)", "int")).toThrow();
+  });
+
+  test("throws on invalid validator for type", () => {
+    expect(() => parseValidators("min(1)", "string")).toThrow();
+    expect(() => parseValidators("format(/^x/)", "int")).toThrow();
+  });
+
+  test("throws on malformed validator string", () => {
+    expect(() => parseValidators("min(1),oops", "int")).toThrow();
+  });
 });
 
 describe("parseFormatRegex", () => {

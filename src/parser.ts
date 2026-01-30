@@ -6,6 +6,7 @@ import type {
   SchemaType,
   Validator,
 } from "./types";
+import { ParseError } from "./types";
 
 export function parseHeader(line: string): EnvFileHeader | null {
   const match = line.match(/^#env-manager:\s*([^\s|]+)\s*\|\s*(.+)$/);
@@ -24,23 +25,61 @@ export function parseFormatRegex(formatStr: string): RegExp {
 
 export function parseValidators(
   validatorStr: string,
-  _type: SchemaType
+  type: SchemaType
 ): Validator[] {
   if (!validatorStr.trim()) return [];
 
   const validators: Validator[] = [];
   const pattern = /(min|max|format)\(([^)]+)\)/g;
   let match;
+  let lastIndex = 0;
 
   while ((match = pattern.exec(validatorStr)) !== null) {
+    const between = validatorStr.slice(lastIndex, match.index);
+    if (between.replace(/[,\s]/g, "") !== "") {
+      throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    }
+
     const [, kind, value] = match;
     if (kind === "min") {
-      validators.push({ kind: "min", value: parseFloat(value) });
+      if (type !== "int" && type !== "float") {
+        throw new ParseError(`min() is not valid for type ${type}`);
+      }
+      const parsed = parseFloat(value);
+      if (Number.isNaN(parsed)) {
+        throw new ParseError(`Invalid min() value: ${value}`);
+      }
+      validators.push({ kind: "min", value: parsed });
     } else if (kind === "max") {
-      validators.push({ kind: "max", value: parseFloat(value) });
+      if (type !== "int" && type !== "float") {
+        throw new ParseError(`max() is not valid for type ${type}`);
+      }
+      const parsed = parseFloat(value);
+      if (Number.isNaN(parsed)) {
+        throw new ParseError(`Invalid max() value: ${value}`);
+      }
+      validators.push({ kind: "max", value: parsed });
     } else if (kind === "format") {
-      validators.push({ kind: "format", pattern: parseFormatRegex(value) });
+      if (type !== "string") {
+        throw new ParseError(`format() is not valid for type ${type}`);
+      }
+      try {
+        validators.push({ kind: "format", pattern: parseFormatRegex(value) });
+      } catch (error) {
+        throw new ParseError(
+          error instanceof Error ? error.message : String(error)
+        );
+      }
     }
+    lastIndex = pattern.lastIndex;
+  }
+
+  const trailing = validatorStr.slice(lastIndex);
+  if (trailing.replace(/[,\s]/g, "") !== "") {
+    throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+  }
+  if (validators.length === 0) {
+    throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
   }
 
   return validators;
