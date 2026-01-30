@@ -6,6 +6,7 @@ import {
   parseHeader,
   parseSchemaComment,
   parseValidators,
+  updateHeaderSyncDate,
 } from "./parser";
 import type { FormatValidator } from "./types";
 
@@ -224,6 +225,18 @@ PORT=3000 # {int:min(3000),max(10000)}
     });
   });
 
+  test("finds header after leading comments", () => {
+    const content = `# comment
+# another
+#env-manager: test-project | 2025-01-15T10:30:00-05:00
+
+FOO=bar # {string}
+`;
+    const result = parseEnvFile(content);
+    expect(result.header?.project).toBe("test-project");
+    expect(result.schema[0].name).toBe("FOO");
+  });
+
   test("handles schema comment on line before", () => {
     const content = `# {string}
 FOO=bar
@@ -326,5 +339,22 @@ BAZ=qux#not-comment
       BAR: "hash#inside",
       BAZ: "qux#not-comment",
     });
+  });
+});
+
+describe("updateHeaderSyncDate", () => {
+  test("updates header after leading comments", () => {
+    const input = `# comment
+#env-manager: demo | 2025-01-01T00:00:00Z
+
+FOO=bar
+`;
+    const updated = updateHeaderSyncDate(
+      input,
+      "2025-02-01T00:00:00Z"
+    );
+    expect(updated.split("\n")[1]).toBe(
+      "#env-manager: demo | 2025-02-01T00:00:00Z"
+    );
   });
 });

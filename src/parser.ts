@@ -170,6 +170,7 @@ export function parseEnvFile(content: string): ParsedEnvFile {
   const lines = content.split("\n");
   const schema: EnvVarSchema[] = [];
   let header: EnvFileHeader | null = null;
+  let headerSearchActive = true;
   let pendingSchema: {
     type: SchemaType;
     optional: boolean;
@@ -180,12 +181,23 @@ export function parseEnvFile(content: string): ParsedEnvFile {
     const line = lines[i];
     const lineNumber = i + 1;
 
-    if (i === 0 || (i === 1 && !header)) {
+    if (headerSearchActive && !header) {
       const h = parseHeader(line);
       if (h) {
         header = h;
         continue;
       }
+      const trimmed = line.trim();
+      if (trimmed === "") {
+        continue;
+      }
+      if (trimmed.startsWith("#")) {
+        const schemaComment = parseSchemaComment(line);
+        if (!schemaComment) {
+          continue;
+        }
+      }
+      headerSearchActive = false;
     }
 
     const envLine = parseEnvLine(line);
@@ -298,12 +310,20 @@ function formatSchemaComment(s: EnvVarSchema): string {
 
 export function updateHeaderSyncDate(content: string, newDate: string): string {
   const lines = content.split("\n");
-  for (let i = 0; i < Math.min(2, lines.length); i++) {
-    const header = parseHeader(lines[i]);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const header = parseHeader(line);
     if (header) {
       lines[i] = `#env-manager: ${header.project} | ${newDate}`;
       break;
     }
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    if (trimmed.startsWith("#")) {
+      const schemaComment = parseSchemaComment(line);
+      if (!schemaComment) continue;
+    }
+    break;
   }
   return lines.join("\n");
 }
