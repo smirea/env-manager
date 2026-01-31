@@ -39,6 +39,7 @@ export interface SecretPayload {
   values: string;
   syncDate: string;
   files?: Record<string, string>;
+  locations?: Record<string, string>;
 }
 
 export interface CommandContext {

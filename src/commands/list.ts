@@ -1,18 +1,38 @@
-import { createAwsAdapter } from "../aws";
+import { createAwsAdapter, secretName } from "../aws";
+import { GLOBAL_PROJECT } from "../global";
+import { parseEnvValues } from "../parser";
 import type { CommandContext } from "../types";
 
 export async function listCommand(_ctx: CommandContext): Promise<void> {
   const aws = createAwsAdapter();
   const secrets = await aws.listSecrets("env-manager/");
 
-  if (secrets.length === 0) {
+  const projectNames = secrets
+    .map((name) => name.replace("env-manager/", ""))
+    .filter((name) => name !== GLOBAL_PROJECT);
+
+  if (projectNames.length === 0) {
     console.log("No projects found in env-manager namespace.");
-    return;
+  } else {
+    console.log("Projects:");
+    for (const name of projectNames) {
+      console.log(`  ${name}`);
+    }
   }
 
-  console.log("Projects:");
-  for (const name of secrets) {
-    const project = name.replace("env-manager/", "");
-    console.log(`  ${project}`);
+  const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
+  const globalValues = globalSecret?.values
+    ? parseEnvValues(globalSecret.values)
+    : {};
+  const globalKeys = Object.keys(globalValues).sort();
+
+  console.log("");
+  console.log("Global defaults:");
+  if (globalKeys.length === 0) {
+    console.log("  (none)");
+    return;
+  }
+  for (const key of globalKeys) {
+    console.log(`  ${key}`);
   }
 }

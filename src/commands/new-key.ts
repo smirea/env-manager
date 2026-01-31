@@ -1,5 +1,6 @@
 import { createAwsAdapter, secretName } from "../aws";
 import { collectFilePayload } from "../file-sync";
+import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { getKey, listKeys, listKeyNames } from "../keys";
 import {
   appendSchemaEntry,
@@ -11,8 +12,6 @@ import {
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
-
-const DEFAULT_PROJECT = "default";
 
 async function promptChoice(question: string, options: string[]): Promise<number> {
   console.log(question);
@@ -38,33 +37,36 @@ export function listKeysCommand(): void {
   }
 }
 
-async function getDefaultValue(
+async function getGlobalValue(
   aws: ReturnType<typeof createAwsAdapter>,
   keyName: string
 ): Promise<string | null> {
-  const secret = await aws.getSecret(secretName(DEFAULT_PROJECT));
+  const secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
   if (!secret?.values) return null;
 
   const values = parseEnvValues(secret.values);
   return values[keyName] ?? null;
 }
 
-async function saveToDefault(
+async function saveToGlobal(
   aws: ReturnType<typeof createAwsAdapter>,
   keyName: string,
   keyValue: string,
-  schemaType: string
+  schemaType: string,
+  location?: string
 ): Promise<void> {
-  let secret = await aws.getSecret(secretName(DEFAULT_PROJECT));
+  let secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
 
   const now = new Date().toISOString();
 
   if (!secret) {
-    const header = `#env-manager: ${DEFAULT_PROJECT} | ${now}\n\n`;
+    const header = `#env-manager: ${GLOBAL_PROJECT} | ${now}\n\n`;
+    const locations = location ? { [keyName]: location } : undefined;
     secret = {
       schema: header + `${keyName}= # {${schemaType}}\n`,
       values: `${keyName}=${keyValue}`,
       syncDate: now,
+      locations,
     };
   } else {
     let schema = secret.schema;
@@ -78,6 +80,11 @@ async function saveToDefault(
     const values = parseEnvValues(secret.values);
     values[keyName] = keyValue;
 
+    const locations = { ...secret.locations };
+    if (location) {
+      locations[keyName] = location;
+    }
+
     secret = {
       schema,
       values: Object.entries(values)
@@ -85,10 +92,11 @@ async function saveToDefault(
         .join("\n"),
       syncDate: now,
       files: secret.files,
+      locations: Object.keys(locations).length > 0 ? locations : undefined,
     };
   }
 
-  await aws.putSecret(secretName(DEFAULT_PROJECT), secret);
+  await aws.putSecret(secretName(GLOBAL_PROJECT), secret);
 }
 
 export async function newKeyCommand(
@@ -134,19 +142,19 @@ export async function newKeyCommand(
   }
 
   const aws = createAwsAdapter();
-  const defaultValue = await getDefaultValue(aws, keyName);
+  const globalValue = await getGlobalValue(aws, keyName);
 
   let key: string;
 
-  if (defaultValue) {
-    const choice = await promptChoice(`${keyName} found in /default`, [
-      "Use existing from /default",
+  if (globalValue) {
+    const choice = await promptChoice(`${keyName} found in ${GLOBAL_LABEL}`, [
+      `Use existing from ${GLOBAL_LABEL}`,
       "Create new key",
     ]);
 
     if (choice === 1) {
-      key = defaultValue;
-      console.log(`Using ${keyName} from /default`);
+      key = globalValue;
+      console.log(`Using ${keyName} from ${GLOBAL_LABEL}`);
     } else {
       console.log(`Creating new ${keyName}...`);
       key = await keyDef.resolve(ctx.project);
@@ -194,9 +202,9 @@ export async function newKeyCommand(
   await aws.putSecret(secretName(ctx.project), payload);
   await Bun.write(envPath, envContent);
 
-  if (!defaultValue || key !== defaultValue) {
-    await saveToDefault(aws, keyName, key, keyDef.schemaType);
-    console.log(`Saved ${keyName} to /default`);
+  if (!globalValue || key !== globalValue) {
+    await saveToGlobal(aws, keyName, key, keyDef.schemaType, ctx.project);
+    console.log(`Saved ${keyName} to ${GLOBAL_LABEL}`);
   }
 
   console.log(`Added ${keyName} and synced to AWS`);

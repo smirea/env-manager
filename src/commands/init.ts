@@ -1,11 +1,10 @@
 import { createAwsAdapter, secretName } from "../aws";
 import { writeFilesFromPayload } from "../file-sync";
+import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { parseEnvFile, parseEnvValues, setEnvValue } from "../parser";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
-
-const DEFAULT_PROJECT = "default";
 
 const TEMPLATE = `#env-manager: {{PROJECT}} | {{DATE}}
 
@@ -65,21 +64,21 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
   await Bun.write(envPath, content);
   console.log(`Created new .env template for project "${ctx.project}"`);
 
-  const defaultSecret = await aws.getSecret(secretName(DEFAULT_PROJECT));
-  if (!defaultSecret?.values) {
+  const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
+  if (!globalSecret?.values) {
     return;
   }
 
-  const defaultValues = parseEnvValues(defaultSecret.values);
-  const defaultParsed = parseEnvFile(defaultSecret.schema);
-  const defaultVarNames = defaultParsed.schema.map((s) => s.name);
+  const globalValues = parseEnvValues(globalSecret.values);
+  const globalParsed = parseEnvFile(globalSecret.schema);
+  const globalVarNames = globalParsed.schema.map((s) => s.name);
 
-  if (defaultVarNames.length === 0) {
+  if (globalVarNames.length === 0) {
     return;
   }
 
-  console.log(`\nFound ${defaultVarNames.length} key(s) in /default:`);
-  for (const name of defaultVarNames) {
+  console.log(`\nFound ${globalVarNames.length} key(s) in ${GLOBAL_LABEL}:`);
+  for (const name of globalVarNames) {
     console.log(`  - ${name}`);
   }
   console.log();
@@ -91,11 +90,11 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
   }
 
   let copiedAny = false;
-  for (const name of defaultVarNames) {
-    const value = defaultValues[name];
+  for (const name of globalVarNames) {
+    const value = globalValues[name];
     if (!value) continue;
 
-    const useIt = await promptYesNo(`Use ${name} from /default?`);
+    const useIt = await promptYesNo(`Use ${name} from ${GLOBAL_LABEL}?`);
     if (useIt) {
       localContent = setEnvValue(localContent, name, value);
       copiedAny = true;

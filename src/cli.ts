@@ -5,6 +5,11 @@ import yargs, { type Argv, type CommandModule } from "yargs";
 import { hideBin } from "yargs/helpers";
 import { checkAwsCredentials } from "./aws";
 import { downCommand } from "./commands/down";
+import {
+  globalGetCommand,
+  globalListCommand,
+  globalSetCommand,
+} from "./commands/global";
 import { initCommand } from "./commands/init";
 import { listCommand } from "./commands/list";
 import { listKeysCommand, newKeyCommand } from "./commands/new-key";
@@ -13,7 +18,7 @@ import { upCommand } from "./commands/up";
 import type { CommandContext } from "./types";
 import { EnvManagerError } from "./types";
 
-const RESERVED_PROJECT_NAMES = ["default"];
+const RESERVED_PROJECT_NAMES = ["default", "global"];
 const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
 const SUPPORTED_SCHEMA_TYPES = [
   "string",
@@ -114,10 +119,46 @@ const initCmd: CommandModule<GlobalArgs, GlobalArgs> = {
 const listCmd: CommandModule<GlobalArgs, GlobalArgs> = {
   command: "list",
   describe:
-    "List all projects stored under the env-manager/<project> Secrets Manager namespace",
+    "List all projects stored under the env-manager/<project> Secrets Manager namespace and global keys",
   handler: async (argv) => {
     await checkAwsCredentials();
     await listCommand(createContext(argv));
+  },
+};
+
+interface GlobalGetArgs extends GlobalArgs {
+  name?: string;
+}
+
+const globalSetCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+  command: "global set",
+  describe: "Set a global default env var",
+  handler: async (argv) => {
+    await checkAwsCredentials();
+    await globalSetCommand(createContext(argv));
+  },
+};
+
+const globalGetCmd: CommandModule<GlobalArgs, GlobalGetArgs> = {
+  command: "global get [name]",
+  describe: "Get a global default env var",
+  builder: (yargs: Argv<GlobalArgs>) =>
+    yargs.positional("name", {
+      type: "string",
+      description: "Global env var name",
+    }) as Argv<GlobalGetArgs>,
+  handler: async (argv) => {
+    await checkAwsCredentials();
+    await globalGetCommand(createContext(argv), argv.name);
+  },
+};
+
+const globalListCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+  command: "global list",
+  describe: "List global default env vars",
+  handler: async (argv) => {
+    await checkAwsCredentials();
+    await globalListCommand(createContext(argv));
   },
 };
 
@@ -174,6 +215,9 @@ async function run() {
     .command(tsCmd)
     .command(initCmd)
     .command(listCmd)
+    .command(globalSetCmd)
+    .command(globalGetCmd)
+    .command(globalListCmd)
     .command(newKeyCmd)
     .demandCommand(1, "Please specify a command")
     .strict()

@@ -23,7 +23,10 @@ env-manager <command> [options]
 | `up` | Upload `.env` schema and `.env.local` values to AWS |
 | `down` | Download `.env` and `.env.local` from AWS |
 | `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
-| `list` | List all projects in `env-manager/*` namespace |
+| `list` | List all projects in `env-manager/*` namespace and global keys |
+| `global set` | Set a global default env var |
+| `global get [NAME]` | Get a global default env var |
+| `global list` | List all global default env vars |
 | `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`) |
 | `new-key --list` | List available keys |
 
@@ -70,7 +73,15 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
 ## Global Defaults
 
-The `/default` project stores shared API keys that can be reused across projects.
+Global defaults store shared env vars that can be reused across projects.
+
+### Manage global defaults
+
+```bash
+env-manager global set
+env-manager global get ANTHROPIC_API_KEY
+env-manager global list
+```
 
 ### Adding a key
 
@@ -78,15 +89,15 @@ The `/default` project stores shared API keys that can be reused across projects
 env-manager new-key ANTHROPIC_API_KEY
 ```
 
-If the key exists in `/default`, you'll be prompted:
+If the key exists in global defaults, you'll be prompted:
 ```
-ANTHROPIC_API_KEY found in /default
-  [1] Use existing from /default
+ANTHROPIC_API_KEY found in global defaults
+  [1] Use existing from global defaults
   [2] Create new key
 Choice:
 ```
 
-New keys are automatically saved to both your current project and `/default` for future reuse.
+New keys are automatically saved to both your current project and global defaults for future reuse.
 
 ### Available keys
 
@@ -106,12 +117,12 @@ env-manager init
 
 Creates `.env` from AWS if the project exists, otherwise creates a new template.
 
-If `/default` contains keys, you'll be prompted to copy them:
+If global defaults contains keys, you'll be prompted to copy them:
 ```
-Found 1 key(s) in /default:
+Found 1 key(s) in global defaults:
   - ANTHROPIC_API_KEY
 
-Use ANTHROPIC_API_KEY from /default? (Y/n):
+Use ANTHROPIC_API_KEY from global defaults? (Y/n):
 ```
 
 ### 2. Define your schema
