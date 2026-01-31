@@ -1,3 +1,11 @@
+import {
+  CreateSecretCommand,
+  GetSecretValueCommand,
+  ListSecretsCommand,
+  PutSecretValueCommand,
+  SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
+import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import type { SecretPayload } from "./types";
 import { AwsError } from "./types";
 
@@ -11,28 +19,85 @@ export function secretName(project: string): string {
   return `env-manager/${project}`;
 }
 
-export class AwsCliAdapter implements AwsAdapter {
-  async getSecret(name: string): Promise<SecretPayload | null> {
-    const result =
-      await Bun.$`aws secretsmanager get-secret-value --secret-id ${name} --query SecretString --output text`
-        .quiet()
-        .nothrow();
+function getAwsRegion(): string {
+  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+  if (!region) {
+    throw new AwsError(
+      "AWS region not configured. Set AWS_REGION or AWS_DEFAULT_REGION."
+    );
+  }
+  return region;
+}
 
-    if (result.exitCode !== 0) {
-      const stderr = result.stderr.toString();
-      if (
-        stderr.includes("ResourceNotFoundException") ||
-        stderr.includes("Secrets Manager can't find")
-      ) {
-        return null;
-      }
-      throw new AwsError(`Failed to get secret: ${stderr}`);
+function getStaticCredentials():
+  | {
+      accessKeyId: string;
+      secretAccessKey: string;
+      sessionToken?: string;
     }
+  | null {
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const sessionToken = process.env.AWS_SESSION_TOKEN;
 
+  if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
+    throw new AwsError(
+      "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must both be set."
+    );
+  }
+
+  if (!accessKeyId || !secretAccessKey) {
+    return null;
+  }
+
+  return { accessKeyId, secretAccessKey, sessionToken };
+}
+
+function formatAwsError(err: unknown): string {
+  if (err && typeof err === "object") {
+    const name = (err as { name?: string }).name ?? "UnknownError";
+    const message = (err as { message?: string }).message ?? String(err);
+    return `${name}: ${message}`;
+  }
+  return String(err);
+}
+
+function isResourceNotFound(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    (err as { name?: string }).name === "ResourceNotFoundException"
+  );
+}
+
+class AwsSdkAdapter implements AwsAdapter {
+  private readonly secrets: SecretsManagerClient;
+
+  constructor() {
+    const region = getAwsRegion();
+    const credentials = getStaticCredentials();
+    this.secrets = new SecretsManagerClient({
+      region,
+      credentials: credentials ?? undefined,
+    });
+  }
+
+  async getSecret(name: string): Promise<SecretPayload | null> {
     try {
-      return JSON.parse(result.stdout.toString().trim()) as SecretPayload;
-    } catch {
-      throw new AwsError(`Failed to parse secret JSON: ${result.stdout}`);
+      const result = await this.secrets.send(
+        new GetSecretValueCommand({ SecretId: name })
+      );
+      if (!result.SecretString) {
+        throw new AwsError("Secret is missing SecretString payload.");
+      }
+      try {
+        return JSON.parse(result.SecretString) as SecretPayload;
+      } catch {
+        throw new AwsError(`Failed to parse secret JSON: ${result.SecretString}`);
+      }
+    } catch (error) {
+      if (isResourceNotFound(error)) return null;
+      throw new AwsError(`Failed to get secret: ${formatAwsError(error)}`);
     }
   }
 
@@ -40,58 +105,69 @@ export class AwsCliAdapter implements AwsAdapter {
     const json = JSON.stringify(payload);
     const existing = await this.getSecret(name);
 
-    if (existing) {
-      const result =
-        await Bun.$`aws secretsmanager put-secret-value --secret-id ${name} --secret-string ${json}`
-          .quiet()
-          .nothrow();
-      if (result.exitCode !== 0) {
-        throw new AwsError(
-          `Failed to update secret: ${result.stderr.toString()}`
+    try {
+      if (existing) {
+        await this.secrets.send(
+          new PutSecretValueCommand({
+            SecretId: name,
+            SecretString: json,
+          })
+        );
+      } else {
+        await this.secrets.send(
+          new CreateSecretCommand({
+            Name: name,
+            SecretString: json,
+          })
         );
       }
-    } else {
-      const result =
-        await Bun.$`aws secretsmanager create-secret --name ${name} --secret-string ${json}`
-          .quiet()
-          .nothrow();
-      if (result.exitCode !== 0) {
-        throw new AwsError(
-          `Failed to create secret: ${result.stderr.toString()}`
-        );
-      }
+    } catch (error) {
+      throw new AwsError(`Failed to save secret: ${formatAwsError(error)}`);
     }
   }
 
   async listSecrets(prefix: string): Promise<string[]> {
-    const result =
-      await Bun.$`aws secretsmanager list-secrets --filter Key=name,Values=${prefix} --query SecretList[].Name --output json`
-        .quiet()
-        .nothrow();
-
-    if (result.exitCode !== 0) {
-      throw new AwsError(`Failed to list secrets: ${result.stderr.toString()}`);
-    }
+    const names: string[] = [];
+    let nextToken: string | undefined;
 
     try {
-      const names = JSON.parse(result.stdout.toString().trim()) as string[];
-      return names.filter((n) => n.startsWith(prefix));
-    } catch {
-      throw new AwsError(`Failed to parse secrets list: ${result.stdout}`);
+      do {
+        const result = await this.secrets.send(
+          new ListSecretsCommand({
+            Filters: [{ Key: "name", Values: [prefix] }],
+            NextToken: nextToken,
+          })
+        );
+        if (result.SecretList) {
+          for (const secret of result.SecretList) {
+            if (secret.Name && secret.Name.startsWith(prefix)) {
+              names.push(secret.Name);
+            }
+          }
+        }
+        nextToken = result.NextToken;
+      } while (nextToken);
+    } catch (error) {
+      throw new AwsError(`Failed to list secrets: ${formatAwsError(error)}`);
     }
+
+    return names;
   }
 }
 
 export function createAwsAdapter(): AwsAdapter {
-  return new AwsCliAdapter();
+  return new AwsSdkAdapter();
 }
 
 export async function checkAwsCredentials(): Promise<void> {
-  const result = await Bun.$`aws sts get-caller-identity`.quiet().nothrow();
-  if (result.exitCode !== 0) {
+  const region = getAwsRegion();
+  const credentials = getStaticCredentials();
+  const sts = new STSClient({ region, credentials: credentials ?? undefined });
+  try {
+    await sts.send(new GetCallerIdentityCommand({}));
+  } catch (error) {
     throw new AwsError(
-      "AWS credentials not configured. Run: aws configure\n" +
-        result.stderr.toString()
+      `AWS credentials not configured. ${formatAwsError(error)}`
     );
   }
 }

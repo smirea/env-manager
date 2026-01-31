@@ -1,9 +1,7 @@
 import { createAwsAdapter, secretName } from "../aws";
 import { GLOBAL_PROJECT } from "../global";
 import { parseEnvValues } from "../parser";
-import type { CommandContext } from "../types";
-
-export async function listCommand(_ctx: CommandContext): Promise<void> {
+export async function listCommand(): Promise<void> {
   const aws = createAwsAdapter();
   const secrets = await aws.listSecrets("env-manager/");
 

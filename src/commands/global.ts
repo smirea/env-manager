@@ -2,6 +2,7 @@ import { createAwsAdapter, secretName } from "../aws";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import {
   appendSchemaEntry,
+  generateEnvContent,
   parseEnvFile,
   parseEnvValues,
   updateHeaderSyncDate,
@@ -90,11 +91,19 @@ function collectGlobalEntries(secret: SecretPayload | null): GlobalEntry[] {
     }));
 }
 
-export async function globalSetCommand(_ctx: CommandContext): Promise<void> {
-  const name = await promptRequired("Name");
+export async function globalSetCommand(
+  _ctx: CommandContext,
+  input: { name: string; value: string; location?: string }
+): Promise<void> {
+  const name = input.name.trim();
+  const value = input.value.trim();
+  const location = input.location?.trim() ?? "";
+
+  if (!name || !value) {
+    throw new EnvManagerError("Name and value are required.");
+  }
+
   ensureValidName(name);
-  const value = await promptRequired("Value");
-  const location = await promptRequired("Location");
 
   const aws = createAwsAdapter();
   const now = new Date().toISOString();
@@ -112,7 +121,9 @@ export async function globalSetCommand(_ctx: CommandContext): Promise<void> {
   values[name] = value;
 
   const locations = { ...existing?.locations };
-  locations[name] = location;
+  if (location !== "") {
+    locations[name] = location;
+  }
 
   const payload: SecretPayload = {
     schema,
@@ -162,4 +173,51 @@ export async function globalListCommand(_ctx: CommandContext): Promise<void> {
   }
 
   console.log(formatTable(entries));
+}
+
+export async function globalRmCommand(
+  _ctx: CommandContext,
+  name: string
+): Promise<void> {
+  const trimmed = name.trim();
+  ensureValidName(trimmed);
+
+  const aws = createAwsAdapter();
+  const secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
+  if (!secret?.values) {
+    throw new EnvManagerError("No global defaults found.");
+  }
+
+  const values = parseEnvValues(secret.values);
+  if (!Object.prototype.hasOwnProperty.call(values, trimmed)) {
+    throw new EnvManagerError(`Global key not found: ${trimmed}`);
+  }
+
+  delete values[trimmed];
+  const locations = { ...secret.locations };
+  delete locations[trimmed];
+
+  const parsed = parseEnvFile(secret.schema);
+  const filteredSchema = parsed.schema.filter((s) => s.name !== trimmed);
+  const now = new Date().toISOString();
+  const header = parsed.header ?? { project: GLOBAL_PROJECT, syncDate: now };
+  header.syncDate = now;
+
+  const schema =
+    filteredSchema.length === 0
+      ? `#env-manager: ${header.project} | ${header.syncDate}\n\n`
+      : generateEnvContent(header, filteredSchema, {});
+
+  const payload: SecretPayload = {
+    schema,
+    values: Object.entries(values)
+      .map(([key, val]) => `${key}=${val}`)
+      .join("\n"),
+    syncDate: now,
+    files: secret.files,
+    locations: Object.keys(locations).length > 0 ? locations : undefined,
+  };
+
+  await aws.putSecret(secretName(GLOBAL_PROJECT), payload);
+  console.log(`Removed ${trimmed} from ${GLOBAL_LABEL}`);
 }

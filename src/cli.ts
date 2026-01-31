@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
-import { basename } from "path";
+import { realpathSync } from "fs";
+import { basename, dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import yargs, { type Argv, type CommandModule } from "yargs";
 import { hideBin } from "yargs/helpers";
 import { checkAwsCredentials } from "./aws";
@@ -8,6 +10,7 @@ import { downCommand } from "./commands/down";
 import {
   globalGetCommand,
   globalListCommand,
+  globalRmCommand,
   globalSetCommand,
 } from "./commands/global";
 import { initCommand } from "./commands/init";
@@ -15,6 +18,7 @@ import { listCommand } from "./commands/list";
 import { listKeysCommand, newKeyCommand } from "./commands/new-key";
 import { tsCommand } from "./commands/ts";
 import { upCommand } from "./commands/up";
+import { loadEnvFromPaths } from "./env-loader";
 import type { CommandContext } from "./types";
 import { EnvManagerError } from "./types";
 
@@ -36,8 +40,17 @@ const HELP_FOOTER = `Supported schema formats:
   Optional: prefix any type with "optional"
   Example: # {optional string:format(/^sk-/)}`;
 
-interface GlobalArgs {
+interface ProjectArgs {
   project: string;
+}
+
+function withProjectOption<T>(yargs: Argv<T>): Argv<T & ProjectArgs> {
+  return yargs.option("project", {
+    alias: "p",
+    type: "string",
+    default: basename(process.cwd()),
+    description: "Project name",
+  }) as Argv<T & ProjectArgs>;
 }
 
 function validateProjectName(project: string, command: string): void {
@@ -57,168 +70,367 @@ function validateProjectName(project: string, command: string): void {
   }
 }
 
-function createContext(argv: GlobalArgs): CommandContext {
+function createContext(argv: ProjectArgs): CommandContext {
   return {
     project: argv.project,
     cwd: process.cwd(),
   };
 }
 
-const upCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+const upCmd: CommandModule<any, any> = {
   command: "up",
   describe:
     "Validate schema + values, then upload .env schema, .env.local values, and file payloads to AWS",
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
-    validateProjectName(argv.project, "up");
+    const args = argv as unknown as ProjectArgs;
+    validateProjectName(args.project, "up");
     await checkAwsCredentials();
-    await upCommand(createContext(argv));
+    await upCommand(createContext(args));
   },
 };
 
-const downCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+const downCmd: CommandModule<any, any> = {
   command: "down",
   describe:
     "Download schema + values from AWS, validate them, and write .env/.env.local files",
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
-    validateProjectName(argv.project, "down");
+    const args = argv as unknown as ProjectArgs;
+    validateProjectName(args.project, "down");
     await checkAwsCredentials();
-    await downCommand(createContext(argv));
+    await downCommand(createContext(args));
   },
 };
 
-interface TsArgs extends GlobalArgs {
+interface TsArgs extends ProjectArgs {
   path: string;
 }
 
-const tsCmd: CommandModule<GlobalArgs, TsArgs> = {
+const tsCmd: CommandModule<any, any> = {
   command: "ts [path]",
   describe:
     "Generate a Zod-validated env.ts from the .env schema for typed access",
-  builder: (yargs: Argv<GlobalArgs>) =>
-    yargs.positional("path", {
-      type: "string",
-      default: "src/env.ts",
-      description: "Output path for generated file",
-    }) as Argv<TsArgs>,
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(
+      yargs.positional("path", {
+        type: "string",
+        default: "src/env.ts",
+        description: "Output path for generated file",
+      })
+    ) as Argv<TsArgs>,
   handler: async (argv) => {
-    await tsCommand(createContext(argv), argv.path);
+    const args = argv as unknown as TsArgs;
+    await tsCommand(createContext(args), args.path);
   },
 };
 
-const initCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+const initCmd: CommandModule<any, any> = {
   command: "init",
   describe:
     "Initialize .env from AWS if it exists, otherwise create a new template",
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
-    validateProjectName(argv.project, "init");
+    const args = argv as unknown as ProjectArgs;
+    validateProjectName(args.project, "init");
     await checkAwsCredentials();
-    await initCommand(createContext(argv));
+    await initCommand(createContext(args));
   },
 };
 
-const listCmd: CommandModule<GlobalArgs, GlobalArgs> = {
+const listCmd: CommandModule<any, any> = {
   command: "list",
+  aliases: ["ls"],
   describe:
     "List all projects stored under the env-manager/<project> Secrets Manager namespace and global keys",
-  handler: async (argv) => {
+  handler: async () => {
     await checkAwsCredentials();
-    await listCommand(createContext(argv));
+    await listCommand();
   },
 };
 
-interface GlobalGetArgs extends GlobalArgs {
+interface GlobalGetArgs {
   name?: string;
 }
 
-const globalSetCmd: CommandModule<GlobalArgs, GlobalArgs> = {
-  command: "global set",
+interface GlobalSetArgs {
+  name?: string;
+  value?: string;
+  location?: string;
+}
+
+function parseGlobalSetInput(argv: GlobalSetArgs): {
+  name: string;
+  value: string;
+  location?: string;
+} {
+  const rawArgs = hideBin(process.argv);
+  const globalIndex = rawArgs.indexOf("global");
+  let setIndex = rawArgs.indexOf("set");
+  if (globalIndex !== -1 && rawArgs[globalIndex + 1] === "set") {
+    setIndex = globalIndex + 1;
+  }
+  const argsAfter = setIndex === -1 ? rawArgs : rawArgs.slice(setIndex + 1);
+
+  let flagsUsed = false;
+  const positional: string[] = [];
+  const consumeFlagValue = (arg: string): boolean =>
+    arg === "-n" ||
+    arg === "--name" ||
+    arg === "-v" ||
+    arg === "--value" ||
+    arg === "-l" ||
+    arg === "--location";
+
+  for (let i = 0; i < argsAfter.length; i++) {
+    const arg = argsAfter[i];
+    if (arg === "--") {
+      positional.push(...argsAfter.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith("--")) {
+      if (
+        arg.startsWith("--name=") ||
+        arg.startsWith("--value=") ||
+        arg.startsWith("--location=")
+      ) {
+        flagsUsed = true;
+        continue;
+      }
+      if (consumeFlagValue(arg)) {
+        flagsUsed = true;
+        i++;
+        continue;
+      }
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      if (consumeFlagValue(arg)) {
+        flagsUsed = true;
+        i++;
+        continue;
+      }
+      continue;
+    }
+    positional.push(arg);
+  }
+
+  if (flagsUsed && positional.length > 0) {
+    throw new EnvManagerError(
+      "Use either flags (-n/-v/-l) or positional args, not both."
+    );
+  }
+
+  if (!flagsUsed && positional.length !== 2 && positional.length !== 3) {
+    throw new EnvManagerError(
+      "Usage: env-manager global set <name> <value> [location]"
+    );
+  }
+
+  const name = flagsUsed ? argv.name : positional[0];
+  const value = flagsUsed ? argv.value : positional[1];
+  const location = flagsUsed ? argv.location : positional[2];
+
+  if (flagsUsed && (!value || !name || !location)) {
+    throw new EnvManagerError(
+      "Usage: env-manager global set -n <name> -v <value> -l <location>"
+    );
+  }
+
+  if (!name || !value) {
+    throw new EnvManagerError(
+      "Usage: env-manager global set <name> <value> [location]"
+    );
+  }
+
+  return { name, value, location };
+}
+
+const globalSetCmd: CommandModule<any, any> = {
+  command: "set [name] [value] [location]",
   describe: "Set a global default env var",
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs
+      .positional("name", {
+        type: "string",
+        description: "Global env var name",
+      })
+      .positional("value", {
+        type: "string",
+        description: "Global env var value",
+      })
+      .positional("location", {
+        type: "string",
+        description: "Where the value was generated",
+      })
+      .option("name", {
+        alias: "n",
+        type: "string",
+        description: "Global env var name",
+      })
+      .option("value", {
+        alias: "v",
+        type: "string",
+        description: "Global env var value",
+      })
+      .option("location", {
+        alias: "l",
+        type: "string",
+        description: "Where the value was generated",
+      }) as Argv<GlobalSetArgs>,
   handler: async (argv) => {
     await checkAwsCredentials();
-    await globalSetCommand(createContext(argv));
+    const input = parseGlobalSetInput(argv as GlobalSetArgs);
+    await globalSetCommand(createContext({ project: "default" }), input);
   },
 };
 
-const globalGetCmd: CommandModule<GlobalArgs, GlobalGetArgs> = {
-  command: "global get [name]",
+const globalGetCmd: CommandModule<any, any> = {
+  command: "get [name]",
   describe: "Get a global default env var",
-  builder: (yargs: Argv<GlobalArgs>) =>
+  builder: (yargs: Argv<Record<string, never>>) =>
     yargs.positional("name", {
       type: "string",
       description: "Global env var name",
     }) as Argv<GlobalGetArgs>,
   handler: async (argv) => {
     await checkAwsCredentials();
-    await globalGetCommand(createContext(argv), argv.name);
+    await globalGetCommand(createContext({ project: "default" }), argv.name);
   },
 };
 
-const globalListCmd: CommandModule<GlobalArgs, GlobalArgs> = {
-  command: "global list",
-  describe: "List global default env vars",
+const globalListCmd: CommandModule<any, any> =
+  {
+    command: "list",
+    aliases: ["ls"],
+    describe: "List global default env vars",
+    handler: async () => {
+      await checkAwsCredentials();
+      await globalListCommand(createContext({ project: "default" }));
+    },
+  };
+
+interface GlobalRmArgs {
+  name?: string;
+}
+
+const globalRmCmd: CommandModule<any, any> = {
+  command: "rm [name]",
+  describe: "Remove a global default env var",
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs
+      .positional("name", {
+        type: "string",
+        description: "Global env var name",
+      })
+      .option("name", {
+        alias: "n",
+        type: "string",
+        description: "Global env var name",
+      })
+      .demandOption("name", "Name required") as Argv<GlobalRmArgs>,
   handler: async (argv) => {
+    if (!argv.name) {
+      throw new EnvManagerError("Usage: env-manager global rm <name>");
+    }
     await checkAwsCredentials();
-    await globalListCommand(createContext(argv));
+    await globalRmCommand(createContext({ project: "default" }), argv.name);
   },
 };
 
-interface NewKeyArgs extends GlobalArgs {
+const globalCmd: CommandModule<any, any> = {
+  command: "global",
+  describe: "Manage global defaults",
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs
+      .command(globalSetCmd)
+      .command(globalGetCmd)
+      .command(globalListCmd)
+      .command(globalRmCmd)
+      .demandCommand(1, "Please specify a global command")
+      .strict()
+      .help(),
+  handler: () => {},
+};
+
+interface NewKeyArgs extends ProjectArgs {
   key?: string;
   list: boolean;
 }
 
-const newKeyCmd: CommandModule<GlobalArgs, NewKeyArgs> = {
+const newKeyCmd: CommandModule<any, any> = {
   command: "new-key [key]",
   describe:
     "Create or reuse a known API key, add it to .env/.env.local, and sync to AWS",
-  builder: (yargs: Argv<GlobalArgs>) =>
-    yargs
-      .positional("key", {
-        type: "string",
-        description: "Known key name to create (e.g., ANTHROPIC_API_KEY)",
-      })
-      .option("list", {
-        alias: "l",
-        type: "boolean",
-        default: false,
-        description: "List supported keys and exit",
-      }) as Argv<NewKeyArgs>,
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(
+      yargs
+        .positional("key", {
+          type: "string",
+          description: "Known key name to create (e.g., ANTHROPIC_API_KEY)",
+        })
+        .option("list", {
+          alias: "l",
+          type: "boolean",
+          default: false,
+          description: "List supported keys and exit",
+        })
+    ) as Argv<NewKeyArgs>,
   handler: async (argv) => {
+    const args = argv as unknown as NewKeyArgs;
     if (argv.list) {
       listKeysCommand();
       return;
     }
-    if (!argv.key) {
+    if (!args.key) {
       throw new EnvManagerError(
         "Key name required. Usage: env-manager new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys"
       );
     }
     await checkAwsCredentials();
-    await newKeyCommand(createContext(argv), argv.key);
+    await newKeyCommand(createContext(args), args.key);
   },
 };
 
 async function run() {
+  const entryDirs = new Set<string>();
+  const candidates = [
+    process.argv[1],
+    typeof Bun !== "undefined" ? Bun.main : undefined,
+    fileURLToPath(import.meta.url),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const resolved = realpathSync(candidate);
+      const dir = dirname(resolved);
+      entryDirs.add(dir);
+      entryDirs.add(resolve(dir, ".."));
+    } catch {
+      continue;
+    }
+  }
+
+  loadEnvFromPaths([process.cwd(), ...entryDirs]);
+  const rootCommands: Array<CommandModule<any, any>> = [
+    upCmd,
+    downCmd,
+    tsCmd,
+    initCmd,
+    listCmd,
+    globalCmd,
+    newKeyCmd,
+  ];
   await yargs(hideBin(process.argv))
     .scriptName("env-manager")
     .usage(
       "$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync."
     )
-    .option("project", {
-      alias: "p",
-      type: "string",
-      default: basename(process.cwd()),
-      description: "Project name",
-    })
-    .command(upCmd)
-    .command(downCmd)
-    .command(tsCmd)
-    .command(initCmd)
-    .command(listCmd)
-    .command(globalSetCmd)
-    .command(globalGetCmd)
-    .command(globalListCmd)
-    .command(newKeyCmd)
+    .command(rootCommands as Array<CommandModule<{}, any>>)
     .demandCommand(1, "Please specify a command")
     .strict()
     .version(false)

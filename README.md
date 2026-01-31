@@ -23,10 +23,11 @@ env-manager <command> [options]
 | `up` | Upload `.env` schema and `.env.local` values to AWS |
 | `down` | Download `.env` and `.env.local` from AWS |
 | `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
-| `list` | List all projects in `env-manager/*` namespace and global keys |
+| `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
 | `global set` | Set a global default env var |
 | `global get [NAME]` | Get a global default env var |
-| `global list` | List all global default env vars |
+| `global list` (`global ls`) | List all global default env vars |
+| `global rm <NAME>` | Remove a global default env var |
 | `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`) |
 | `new-key --list` | List available keys |
 
@@ -78,9 +79,12 @@ Global defaults store shared env vars that can be reused across projects.
 ### Manage global defaults
 
 ```bash
-env-manager global set
+env-manager global set -n ANTHROPIC_API_KEY -v sk-ant-... -l "claude console"
+env-manager global set ANTHROPIC_API_KEY sk-ant-... "claude console"
 env-manager global get ANTHROPIC_API_KEY
 env-manager global list
+env-manager global ls
+env-manager global rm ANTHROPIC_API_KEY
 ```
 
 ### Adding a key
@@ -180,10 +184,15 @@ env-manager down
 
 ## AWS Configuration
 
-The CLI uses the AWS CLI credential chain. Configure with:
+The CLI uses the AWS SDK credential chain and loads `.env.local` from your current
+working directory when it starts (useful when running via a global symlink).
+
+Set credentials in `.env.local`:
 
 ```bash
-aws configure
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=us-east-1
 ```
 
 Secrets are stored in AWS Secrets Manager under `env-manager/<project-name>`.
