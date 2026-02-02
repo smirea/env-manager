@@ -12,7 +12,22 @@ const TEMPLATE = `#env-manager: {{PROJECT}} | {{DATE}}
 # Example: API_KEY= # {string:format(/^sk-/)}
 `;
 
-async function promptYesNo(question: string): Promise<boolean> {
+type InitOptions = {
+  assumeYes?: boolean;
+};
+
+async function promptYesNo(
+  question: string,
+  assumeYes: boolean
+): Promise<boolean> {
+  if (assumeYes) {
+    return true;
+  }
+  if (!process.stdin.isTTY) {
+    throw new EnvManagerError(
+      "Non-interactive shell detected. Re-run with --yes to accept defaults."
+    );
+  }
   process.stdout.write(`${question} (Y/n): `);
 
   for await (const line of console) {
@@ -28,42 +43,32 @@ async function promptYesNo(question: string): Promise<boolean> {
   return false;
 }
 
-export async function initCommand(ctx: CommandContext): Promise<void> {
-  const envPath = `${ctx.cwd}/.env`;
-  const localPath = `${ctx.cwd}/.env.local`;
+type CopyGlobalDefaultsParams = {
+  aws: ReturnType<typeof createAwsAdapter>;
+  localPath: string;
+  assumeYes: boolean;
+  restrictToNames: Set<string> | null;
+};
 
-  const exists = await Bun.file(envPath).exists();
-  if (exists) {
-    throw new EnvManagerError(
-      `.env already exists at ${envPath}. Delete it first if you want to reinitialize.`
-    );
+function collectEnvVarNames(content: string): string[] {
+  const names = new Set<string>();
+  const values = parseEnvValues(content);
+  for (const name of Object.keys(values)) {
+    names.add(name);
   }
-
-  const aws = createAwsAdapter();
-  const secret = await aws.getSecret(secretName(ctx.project));
-
-  if (secret) {
-    const parsed = parseEnvFile(secret.schema);
-    const values = parseEnvValues(secret.values ?? "");
-    const result = validateEnv(parsed.schema, values);
-    assertValid(result);
-    await writeFilesFromPayload(parsed.schema, values, secret.files, ctx.cwd);
-    await Bun.write(envPath, secret.schema);
-    if (secret.values) {
-      await Bun.write(localPath, secret.values);
-    }
-    console.log(`Downloaded .env from AWS for project "${ctx.project}"`);
-    return;
+  const parsed = parseEnvFile(content);
+  for (const entry of parsed.schema) {
+    names.add(entry.name);
   }
+  return Array.from(names);
+}
 
-  const now = new Date().toISOString();
-  const content = TEMPLATE.replace("{{PROJECT}}", ctx.project).replace(
-    "{{DATE}}",
-    now
-  );
-  await Bun.write(envPath, content);
-  console.log(`Created new .env template for project "${ctx.project}"`);
-
+async function copyGlobalDefaults({
+  aws,
+  localPath,
+  assumeYes,
+  restrictToNames,
+}: CopyGlobalDefaultsParams): Promise<void> {
   const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
   if (!globalSecret?.values) {
     return;
@@ -71,14 +76,35 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
 
   const globalValues = parseEnvValues(globalSecret.values);
   const globalParsed = parseEnvFile(globalSecret.schema);
-  const globalVarNames = globalParsed.schema.map((s) => s.name);
+  let candidateNames = globalParsed.schema.map((s) => s.name);
 
-  if (globalVarNames.length === 0) {
+  if (candidateNames.length === 0) {
     return;
   }
 
-  console.log(`\nFound ${globalVarNames.length} key(s) in ${GLOBAL_LABEL}:`);
-  for (const name of globalVarNames) {
+  if (restrictToNames) {
+    candidateNames = candidateNames.filter((name) =>
+      restrictToNames.has(name)
+    );
+    if (candidateNames.length === 0) {
+      if (restrictToNames.size === 0) {
+        console.log(
+          `\nNo variables declared in .env to match with ${GLOBAL_LABEL}.`
+        );
+      } else {
+        console.log(
+          `\nNo overlapping keys between .env and ${GLOBAL_LABEL}.`
+        );
+      }
+      return;
+    }
+  }
+
+  const matchLabel = restrictToNames ? " matching your .env" : "";
+  console.log(
+    `\nFound ${candidateNames.length} key(s) in ${GLOBAL_LABEL}${matchLabel}:`
+  );
+  for (const name of candidateNames) {
     console.log(`  - ${name}`);
   }
   console.log();
@@ -90,11 +116,14 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
   }
 
   let copiedAny = false;
-  for (const name of globalVarNames) {
+  for (const name of candidateNames) {
     const value = globalValues[name];
     if (!value) continue;
 
-    const useIt = await promptYesNo(`Use ${name} from ${GLOBAL_LABEL}?`);
+    const useIt = await promptYesNo(
+      `Use ${name} from ${GLOBAL_LABEL}?`,
+      assumeYes
+    );
     if (useIt) {
       localContent = setEnvValue(localContent, name, value);
       copiedAny = true;
@@ -106,4 +135,62 @@ export async function initCommand(ctx: CommandContext): Promise<void> {
     await Bun.write(localPath, localContent);
     console.log(`\nCopied selected keys to .env.local`);
   }
+}
+
+export async function initCommand(
+  ctx: CommandContext,
+  options: InitOptions = {}
+): Promise<void> {
+  const assumeYes = options.assumeYes === true;
+  const envPath = `${ctx.cwd}/.env`;
+  const localPath = `${ctx.cwd}/.env.local`;
+  const envFile = Bun.file(envPath);
+  const envAlreadyExists = await envFile.exists();
+  const aws = createAwsAdapter();
+
+  if (!envAlreadyExists) {
+    const secret = await aws.getSecret(secretName(ctx.project));
+
+    if (secret) {
+      const parsed = parseEnvFile(secret.schema);
+      const values = parseEnvValues(secret.values ?? "");
+      const result = validateEnv(parsed.schema, values);
+      assertValid(result);
+      await writeFilesFromPayload(
+        parsed.schema,
+        values,
+        secret.files,
+        ctx.cwd
+      );
+      await Bun.write(envPath, secret.schema);
+      if (secret.values) {
+        await Bun.write(localPath, secret.values);
+      }
+      console.log(`Downloaded .env from AWS for project "${ctx.project}"`);
+      return;
+    }
+  } else {
+    console.log(`.env already exists at ${envPath}, skipping creation.`);
+  }
+
+  let restrictToNames: Set<string> | null = null;
+  if (envAlreadyExists) {
+    const names = collectEnvVarNames(await envFile.text());
+    restrictToNames = new Set(names);
+  } else {
+    const now = new Date().toISOString();
+    const content = TEMPLATE.replace("{{PROJECT}}", ctx.project).replace(
+      "{{DATE}}",
+      now
+    );
+    await Bun.write(envPath, content);
+    console.log(`Created new .env template for project "${ctx.project}"`);
+  }
+
+  await copyGlobalDefaults({
+    aws,
+    localPath,
+    assumeYes,
+    restrictToNames,
+  });
 }

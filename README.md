@@ -19,7 +19,7 @@ env-manager <command> [options]
 
 | Command | Description |
 |---------|-------------|
-| `init` | Create `.env` from AWS or new template |
+| `init` | Create `.env` from AWS or new template and copy matching global defaults |
 | `up` | Upload `.env` schema and `.env.local` values to AWS |
 | `down` | Download `.env` and `.env.local` from AWS |
 | `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
@@ -36,6 +36,7 @@ env-manager <command> [options]
 | Option | Description |
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: current directory name) |
+| `-y, --yes` | Accept defaults for prompts (non-interactive) |
 | `-h, --help` | Show help message |
 
 ## Schema Format
@@ -101,6 +102,11 @@ ANTHROPIC_API_KEY found in global defaults
 Choice:
 ```
 
+To run non-interactively and use the default choice:
+```bash
+env-manager new-key ANTHROPIC_API_KEY --yes
+```
+
 New keys are automatically saved to both your current project and global defaults for future reuse.
 
 ### Available keys
@@ -120,6 +126,8 @@ env-manager init
 ```
 
 Creates `.env` from AWS if the project exists, otherwise creates a new template.
+If `.env` is already present, `env-manager init` leaves it untouched and simply
+re-syncs `.env.local` with any global defaults that share a schema entry.
 
 If global defaults contains keys, you'll be prompted to copy them:
 ```
@@ -128,6 +136,15 @@ Found 1 key(s) in global defaults:
 
 Use ANTHROPIC_API_KEY from global defaults? (Y/n):
 ```
+
+To copy all defaults without prompts:
+```bash
+env-manager init --yes
+```
+
+Re-running `env-manager init` later is an easy way to refresh `.env.local`
+with any new global defaults you've added. Only keys that exist in `.env`
+are considered, so unrelated global values stay untouched.
 
 ### 2. Define your schema
 

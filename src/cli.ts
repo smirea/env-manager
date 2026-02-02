@@ -127,17 +127,28 @@ const tsCmd: CommandModule<any, any> = {
   },
 };
 
+interface InitArgs extends ProjectArgs {
+  yes: boolean;
+}
+
 const initCmd: CommandModule<any, any> = {
   command: "init",
   describe:
     "Initialize .env from AWS if it exists, otherwise create a new template",
   builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(yargs) as Argv<ProjectArgs>,
+    withProjectOption(
+      yargs.option("yes", {
+        alias: "y",
+        type: "boolean",
+        default: false,
+        description: "Accept defaults for prompts",
+      })
+    ) as Argv<InitArgs>,
   handler: async (argv) => {
-    const args = argv as unknown as ProjectArgs;
+    const args = argv as unknown as InitArgs;
     validateProjectName(args.project, "init");
     await checkAwsCredentials();
-    await initCommand(createContext(args));
+    await initCommand(createContext(args), { assumeYes: args.yes });
   },
 };
 
@@ -359,6 +370,7 @@ const globalCmd: CommandModule<any, any> = {
 interface NewKeyArgs extends ProjectArgs {
   key?: string;
   list: boolean;
+  yes: boolean;
 }
 
 const newKeyCmd: CommandModule<any, any> = {
@@ -378,7 +390,13 @@ const newKeyCmd: CommandModule<any, any> = {
           default: false,
           description: "List supported keys and exit",
         })
-    ) as Argv<NewKeyArgs>,
+        .option("yes", {
+          alias: "y",
+          type: "boolean",
+          default: false,
+          description: "Accept defaults for prompts",
+        })
+    ) as unknown as Argv<NewKeyArgs>,
   handler: async (argv) => {
     const args = argv as unknown as NewKeyArgs;
     if (argv.list) {
@@ -391,7 +409,9 @@ const newKeyCmd: CommandModule<any, any> = {
       );
     }
     await checkAwsCredentials();
-    await newKeyCommand(createContext(args), args.key);
+    await newKeyCommand(createContext(args), args.key, {
+      assumeYes: args.yes,
+    });
   },
 };
 
