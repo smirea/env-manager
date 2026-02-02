@@ -2,6 +2,7 @@ import { createAwsAdapter, secretName } from "../aws";
 import { writeFilesFromPayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { parseEnvFile, parseEnvValues, setEnvValue } from "../parser";
+import { promptLine } from "../prompt";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
@@ -28,19 +29,17 @@ async function promptYesNo(
       "Non-interactive shell detected. Re-run with --yes to accept defaults."
     );
   }
-  process.stdout.write(`${question} (Y/n): `);
-
-  for await (const line of console) {
-    const answer = line.trim().toLowerCase();
+  let prompt = `${question} (Y/n): `;
+  while (true) {
+    const answer = (await promptLine(prompt)).trim().toLowerCase();
     if (answer === "" || answer === "y" || answer === "yes") {
       return true;
     }
     if (answer === "n" || answer === "no") {
       return false;
     }
-    process.stdout.write("Please answer Y or n: ");
+    prompt = "Please answer Y or n: ";
   }
-  return false;
 }
 
 type CopyGlobalDefaultsParams = {

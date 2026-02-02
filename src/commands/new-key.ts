@@ -2,6 +2,7 @@ import { createAwsAdapter, secretName } from "../aws";
 import { collectFilePayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { getKey, listKeys, listKeyNames } from "../keys";
+import { promptLine } from "../prompt";
 import {
   appendSchemaEntry,
   parseEnvFile,
@@ -13,19 +14,36 @@ import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
 
-async function promptChoice(question: string, options: string[]): Promise<number> {
+type NewKeyOptions = {
+  assumeYes?: boolean;
+};
+
+async function promptChoice(
+  question: string,
+  options: string[],
+  defaultChoice: number,
+  assumeYes: boolean
+): Promise<number> {
+  if (assumeYes) {
+    return defaultChoice;
+  }
+  if (!process.stdin.isTTY) {
+    throw new EnvManagerError(
+      "Non-interactive shell detected. Re-run with --yes to accept defaults."
+    );
+  }
   console.log(question);
   options.forEach((opt, i) => console.log(`  [${i + 1}] ${opt}`));
-  process.stdout.write("Choice: ");
 
-  for await (const line of console) {
-    const choice = parseInt(line.trim(), 10);
+  let prompt = "Choice: ";
+  while (true) {
+    const input = await promptLine(prompt);
+    const choice = parseInt(input.trim(), 10);
     if (choice >= 1 && choice <= options.length) {
       return choice;
     }
-    process.stdout.write("Invalid choice. Try again: ");
+    prompt = "Invalid choice. Try again: ";
   }
-  throw new EnvManagerError("No input received");
 }
 
 export function listKeysCommand(): void {
@@ -101,8 +119,10 @@ async function saveToGlobal(
 
 export async function newKeyCommand(
   ctx: CommandContext,
-  keyName: string
+  keyName: string,
+  options: NewKeyOptions = {}
 ): Promise<void> {
+  const assumeYes = options.assumeYes === true;
   const keyDef = getKey(keyName);
   if (!keyDef) {
     const available = listKeyNames().join(", ");
@@ -147,10 +167,12 @@ export async function newKeyCommand(
   let key: string;
 
   if (globalValue) {
-    const choice = await promptChoice(`${keyName} found in ${GLOBAL_LABEL}`, [
-      `Use existing from ${GLOBAL_LABEL}`,
-      "Create new key",
-    ]);
+    const choice = await promptChoice(
+      `${keyName} found in ${GLOBAL_LABEL}`,
+      [`Use existing from ${GLOBAL_LABEL}`, "Create new key"],
+      1,
+      assumeYes
+    );
 
     if (choice === 1) {
       key = globalValue;
