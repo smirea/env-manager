@@ -67,6 +67,11 @@ function formatTable(rows: GlobalEntry[]): string {
 }
 
 async function promptRequired(label: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    throw new EnvManagerError(
+      `Non-interactive shell detected. Provide "${label}" as an argument.`
+    );
+  }
   process.stdout.write(`${label}: `);
   for await (const line of console) {
     const value = line.trim();

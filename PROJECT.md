@@ -38,7 +38,8 @@ utility to manage my own environment variables for all my personal projects
     3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to `.env.local`, syncs to AWS. auto-adds schema entry if missing.
 
     flags:
-    - none
+    - `-p, --project <name>`: project name (defaults to cwd basename)
+    - `-y, --yes`: accept defaults for prompts (non-interactive)
 
 ## Key Providers
 
