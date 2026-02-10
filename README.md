@@ -201,10 +201,11 @@ env-manager down
 
 ## AWS Configuration
 
-The CLI uses the AWS SDK credential chain and loads `.env.local` from your current
-working directory when it starts (useful when running via a global symlink).
+The CLI uses the AWS SDK credential chain and loads `.env.local` (and `.env`) from
+the env-manager package directory when it starts. It does not load `.env*` files
+from whatever directory you run it in.
 
-Set credentials in `.env.local`:
+Set credentials in env-manager's `.env.local`:
 
 ```bash
 AWS_ACCESS_KEY_ID=...

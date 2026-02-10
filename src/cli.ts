@@ -435,7 +435,7 @@ async function run() {
     }
   }
 
-  loadEnvFromPaths([process.cwd(), ...entryDirs]);
+  loadEnvFromPaths([...entryDirs]);
   const rootCommands: Array<CommandModule<any, any>> = [
     upCmd,
     downCmd,
