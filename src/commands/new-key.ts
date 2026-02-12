@@ -3,6 +3,7 @@ import { collectFilePayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { getKey, listKeys, listKeyNames } from "../keys";
 import type { KeyResolveOptions } from "../keys";
+import { OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD } from "../keys/openrouter";
 import { promptLine } from "../prompt";
 import {
   appendSchemaEntry,
@@ -19,8 +20,11 @@ type NewKeyOptions = {
   assumeYes?: boolean;
   name?: string;
   credit?: number;
+  unlimited?: boolean;
   expiration?: string;
 };
+
+type OpenRouterLimitChoice = Pick<KeyResolveOptions, "credit" | "unlimited">;
 
 async function promptChoice(
   question: string,
@@ -48,6 +52,61 @@ async function promptChoice(
     }
     prompt = "Invalid choice. Try again: ";
   }
+}
+
+async function promptOpenRouterCreditLimit(
+  assumeYes: boolean
+): Promise<OpenRouterLimitChoice> {
+  if (assumeYes) {
+    return { credit: OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD };
+  }
+  if (!process.stdin.isTTY) {
+    throw new EnvManagerError(
+      `Non-interactive shell detected. Re-run with --yes to use the default OpenRouter limit (${OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD} USD/month), or pass --credit/--unlimited.`
+    );
+  }
+
+  let prompt = `OpenRouter monthly credit limit in USD (default ${OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD}; type "unlimited" for no limit): `;
+  while (true) {
+    const input = (await promptLine(prompt)).trim().toLowerCase();
+    if (input === "") {
+      return { credit: OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD };
+    }
+    if (input === "unlimited") {
+      return { unlimited: true };
+    }
+    const limit = Number(input);
+    if (Number.isFinite(limit) && limit >= 0) {
+      return { credit: limit };
+    }
+    prompt = 'Invalid value. Enter a non-negative number or "unlimited": ';
+  }
+}
+
+async function resolveNewKeyOptions(
+  keyName: string,
+  options: NewKeyOptions,
+  assumeYes: boolean
+): Promise<KeyResolveOptions | undefined> {
+  if (keyName !== "OPENROUTER_API_KEY") {
+    return undefined;
+  }
+
+  let credit = options.credit;
+  let unlimited = options.unlimited;
+
+  if (credit === undefined && unlimited !== true) {
+    const limitChoice = await promptOpenRouterCreditLimit(assumeYes);
+    credit = limitChoice.credit;
+    unlimited = limitChoice.unlimited;
+  }
+
+  return {
+    name: options.name,
+    credit,
+    unlimited,
+    expiration: options.expiration,
+  };
 }
 
 export function listKeysCommand(): void {
@@ -130,22 +189,23 @@ export async function newKeyCommand(
   const usingOpenRouterOptions =
     options.name !== undefined ||
     options.credit !== undefined ||
+    options.unlimited === true ||
     options.expiration !== undefined;
 
   if (keyName !== "OPENROUTER_API_KEY" && usingOpenRouterOptions) {
     throw new EnvManagerError(
-      "--name, --credit, and --expiration are only supported for OPENROUTER_API_KEY."
+      "--name, --credit, --unlimited, and --expiration are only supported for OPENROUTER_API_KEY."
     );
   }
-
-  const resolveOptions: KeyResolveOptions | undefined =
-    keyName === "OPENROUTER_API_KEY"
-      ? {
-          name: options.name,
-          credit: options.credit,
-          expiration: options.expiration,
-        }
-      : undefined;
+  if (
+    keyName === "OPENROUTER_API_KEY" &&
+    options.credit !== undefined &&
+    options.unlimited === true
+  ) {
+    throw new EnvManagerError(
+      "--credit and --unlimited cannot be used together."
+    );
+  }
 
   const keyDef = getKey(keyName);
   if (!keyDef) {
@@ -203,10 +263,20 @@ export async function newKeyCommand(
       console.log(`Using ${keyName} from ${GLOBAL_LABEL}`);
     } else {
       console.log(`Creating new ${keyName}...`);
+      const resolveOptions = await resolveNewKeyOptions(
+        keyName,
+        options,
+        assumeYes
+      );
       key = await keyDef.resolve(ctx.project, resolveOptions);
     }
   } else {
     console.log(`Creating ${keyName}...`);
+    const resolveOptions = await resolveNewKeyOptions(
+      keyName,
+      options,
+      assumeYes
+    );
     key = await keyDef.resolve(ctx.project, resolveOptions);
   }
 

@@ -38,7 +38,8 @@ env-manager <command> [options]
 | `-p, --project <name>` | Project name (default: current directory name) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
 | `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
-| `--credit <usd>` | OpenRouter key credit limit in USD (`new-key OPENROUTER_API_KEY` only) |
+| `--credit <usd>` | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`) |
+| `--unlimited` | Create OpenRouter key without a credit limit (`new-key OPENROUTER_API_KEY` only) |
 | `--expiration <utc-iso>` | OpenRouter key expiration (UTC ISO-8601, `new-key OPENROUTER_API_KEY` only) |
 | `-h, --help` | Show help message |
 
@@ -107,9 +108,20 @@ ANTHROPIC_API_KEY found in global defaults
 Choice:
 ```
 
+When creating a new `OPENROUTER_API_KEY`, you'll also be prompted for monthly credit limit:
+```
+OpenRouter monthly credit limit in USD (default 10; type "unlimited" for no limit):
+```
+
 To run non-interactively and use the default choice:
 ```bash
 env-manager new-key ANTHROPIC_API_KEY --yes
+```
+
+For OpenRouter, you can set the limit explicitly:
+```bash
+env-manager new-key OPENROUTER_API_KEY --credit 25
+env-manager new-key OPENROUTER_API_KEY --unlimited
 ```
 
 New keys are automatically saved to both your current project and global defaults for future reuse.

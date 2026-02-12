@@ -16,6 +16,7 @@ type OpenRouterCreateKeyResponse = {
 const OPENROUTER_CREATE_KEY_URL = "https://openrouter.ai/api/v1/keys";
 const ISO_8601_UTC_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+export const OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD = 10;
 
 export function isValidOpenRouterApiKey(key: string): boolean {
   return /^sk-or-v1-[a-zA-Z0-9-_]+$/.test(key);
@@ -61,8 +62,16 @@ export function normalizeOpenRouterOptions(
     throw new EnvManagerError("OpenRouter key name cannot be empty.");
   }
 
-  let limit: number | null = null;
-  if (options?.credit !== undefined) {
+  if (options?.unlimited === true && options.credit !== undefined) {
+    throw new EnvManagerError(
+      "OpenRouter credit and unlimited mode cannot both be set."
+    );
+  }
+
+  let limit: number | null = OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD;
+  if (options?.unlimited === true) {
+    limit = null;
+  } else if (options?.credit !== undefined) {
     if (!Number.isFinite(options.credit) || options.credit < 0) {
       throw new EnvManagerError(
         "OpenRouter credit must be a non-negative number."

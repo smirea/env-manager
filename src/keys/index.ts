@@ -12,6 +12,7 @@ export interface KeyDefinition {
 export interface KeyResolveOptions {
   name?: string;
   credit?: number;
+  unlimited?: boolean;
   expiration?: string;
 }
 

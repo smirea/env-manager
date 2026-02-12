@@ -373,6 +373,7 @@ interface NewKeyArgs extends ProjectArgs {
   yes: boolean;
   name?: string;
   credit?: number;
+  unlimited?: boolean;
   expiration?: string;
 }
 
@@ -408,7 +409,12 @@ const newKeyCmd: CommandModule<any, any> = {
         .option("credit", {
           type: "number",
           description:
-            "OpenRouter key credit limit in USD (OPENROUTER_API_KEY only)",
+            "OpenRouter key credit limit in USD/month (default: 10; OPENROUTER_API_KEY only)",
+        })
+        .option("unlimited", {
+          type: "boolean",
+          description:
+            "Create OpenRouter key without a credit limit (OPENROUTER_API_KEY only)",
         })
         .option("expiration", {
           type: "string",
@@ -432,6 +438,7 @@ const newKeyCmd: CommandModule<any, any> = {
       assumeYes: args.yes,
       name: args.name,
       credit: args.credit,
+      unlimited: args.unlimited ? true : undefined,
       expiration: args.expiration,
     });
   },

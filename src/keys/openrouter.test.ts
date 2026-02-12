@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD,
   extractOpenRouterApiKey,
   isValidOpenRouterApiKey,
   normalizeOpenRouterOptions,
@@ -33,7 +34,7 @@ describe("openrouter key generator", () => {
   test("normalizes defaults from project name", () => {
     expect(normalizeOpenRouterOptions("my-project")).toEqual({
       name: "my-project",
-      limit: null,
+      limit: OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD,
       expiresAt: null,
     });
   });
@@ -55,6 +56,27 @@ describe("openrouter key generator", () => {
   test("rejects invalid credit", () => {
     expect(() =>
       normalizeOpenRouterOptions("my-project", { credit: -1 })
+    ).toThrow();
+  });
+
+  test("allows unlimited credit", () => {
+    expect(
+      normalizeOpenRouterOptions("my-project", {
+        unlimited: true,
+      })
+    ).toEqual({
+      name: "my-project",
+      limit: null,
+      expiresAt: null,
+    });
+  });
+
+  test("rejects credit and unlimited together", () => {
+    expect(() =>
+      normalizeOpenRouterOptions("my-project", {
+        credit: 10,
+        unlimited: true,
+      })
     ).toThrow();
   });
 
