@@ -1,9 +1,13 @@
 import { createAwsAdapter, secretName } from "../aws";
 import { writeFilesFromPayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
-import { parseEnvFile, parseEnvValues, setEnvValue } from "../parser";
+import {
+  generateLocalEnvContent,
+  parseEnvFile,
+  parseEnvValues,
+} from "../parser";
 import { promptLine } from "../prompt";
-import type { CommandContext } from "../types";
+import type { CommandContext, EnvVarSchema } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
 
@@ -47,6 +51,7 @@ type CopyGlobalDefaultsParams = {
   localPath: string;
   assumeYes: boolean;
   restrictToNames: Set<string> | null;
+  localSchema: EnvVarSchema[];
 };
 
 function collectEnvVarNames(content: string): string[] {
@@ -67,6 +72,7 @@ async function copyGlobalDefaults({
   localPath,
   assumeYes,
   restrictToNames,
+  localSchema,
 }: CopyGlobalDefaultsParams): Promise<void> {
   const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
   if (!globalSecret?.values) {
@@ -108,10 +114,10 @@ async function copyGlobalDefaults({
   }
   console.log();
 
-  let localContent = "";
+  let localValues: Record<string, string> = {};
   const localFile = Bun.file(localPath);
   if (await localFile.exists()) {
-    localContent = await localFile.text();
+    localValues = parseEnvValues(await localFile.text());
   }
 
   let copiedAny = false;
@@ -124,13 +130,14 @@ async function copyGlobalDefaults({
       assumeYes
     );
     if (useIt) {
-      localContent = setEnvValue(localContent, name, value);
+      localValues[name] = value;
       copiedAny = true;
       console.log(`  Added ${name}`);
     }
   }
 
   if (copiedAny) {
+    const localContent = generateLocalEnvContent(localSchema, localValues);
     await Bun.write(localPath, localContent);
     console.log(`\nCopied selected keys to .env.local`);
   }
@@ -146,6 +153,7 @@ export async function initCommand(
   const envFile = Bun.file(envPath);
   const envAlreadyExists = await envFile.exists();
   const aws = createAwsAdapter();
+  let envContent = envAlreadyExists ? await envFile.text() : "";
 
   if (!envAlreadyExists) {
     const secret = await aws.getSecret(secretName(ctx.project));
@@ -163,7 +171,10 @@ export async function initCommand(
       );
       await Bun.write(envPath, secret.schema);
       if (secret.values) {
-        await Bun.write(localPath, secret.values);
+        await Bun.write(
+          localPath,
+          generateLocalEnvContent(parsed.schema, values)
+        );
       }
       console.log(`Downloaded .env from AWS for project "${ctx.project}"`);
       return;
@@ -174,22 +185,24 @@ export async function initCommand(
 
   let restrictToNames: Set<string> | null = null;
   if (envAlreadyExists) {
-    const names = collectEnvVarNames(await envFile.text());
+    const names = collectEnvVarNames(envContent);
     restrictToNames = new Set(names);
   } else {
     const now = new Date().toISOString();
-    const content = TEMPLATE.replace("{{PROJECT}}", ctx.project).replace(
+    envContent = TEMPLATE.replace("{{PROJECT}}", ctx.project).replace(
       "{{DATE}}",
       now
     );
-    await Bun.write(envPath, content);
+    await Bun.write(envPath, envContent);
     console.log(`Created new .env template for project "${ctx.project}"`);
   }
+  const localSchema = parseEnvFile(envContent).schema;
 
   await copyGlobalDefaults({
     aws,
     localPath,
     assumeYes,
     restrictToNames,
+    localSchema,
   });
 }

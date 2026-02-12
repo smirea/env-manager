@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
   parseFormatRegex,
@@ -340,6 +341,16 @@ BAZ=qux#not-comment
       BAZ: "qux#not-comment",
     });
   });
+
+  test("handles escaped quotes and backslashes in quoted values", () => {
+    const result = parseEnvValues(`FOO='it\\'s fine' # comment
+BAR='C:\\\\secrets\\\\key'
+`);
+    expect(result).toEqual({
+      FOO: "it's fine",
+      BAR: "C:\\secrets\\key",
+    });
+  });
 });
 
 describe("updateHeaderSyncDate", () => {
@@ -356,5 +367,85 @@ FOO=bar
     expect(updated.split("\n")[1]).toBe(
       "#env-manager: demo | 2025-02-01T00:00:00Z"
     );
+  });
+});
+
+describe("generateLocalEnvContent", () => {
+  test("adds schema comments and quotes non-numeric values", () => {
+    const content = generateLocalEnvContent(
+      [
+        {
+          name: "API_KEY",
+          type: "string",
+          optional: false,
+          validators: [],
+          defaultValue: null,
+          lineNumber: 1,
+        },
+        {
+          name: "PORT",
+          type: "int",
+          optional: false,
+          validators: [],
+          defaultValue: null,
+          lineNumber: 2,
+        },
+        {
+          name: "THRESHOLD",
+          type: "float",
+          optional: false,
+          validators: [],
+          defaultValue: null,
+          lineNumber: 3,
+        },
+        {
+          name: "ENABLED",
+          type: "bool",
+          optional: false,
+          validators: [],
+          defaultValue: null,
+          lineNumber: 4,
+        },
+      ],
+      {
+        API_KEY: "sk-test",
+        PORT: "3000",
+        THRESHOLD: "0.25",
+        ENABLED: "true",
+      }
+    );
+
+    expect(content).toBe(`API_KEY='sk-test' # {string}
+PORT=3000 # {int}
+THRESHOLD=0.25 # {float}
+ENABLED='true' # {bool}
+`);
+  });
+
+  test("keeps non-schema keys and round-trips escaped single quotes", () => {
+    const content = generateLocalEnvContent(
+      [
+        {
+          name: "NAME",
+          type: "string",
+          optional: false,
+          validators: [],
+          defaultValue: null,
+          lineNumber: 1,
+        },
+      ],
+      {
+        NAME: "C:\\O'Reilly",
+        EXTRA: "yes",
+      }
+    );
+
+    expect(content).toBe(`NAME='C:\\\\O\\'Reilly' # {string}
+EXTRA='yes'
+`);
+    expect(parseEnvValues(content)).toEqual({
+      NAME: "C:\\O'Reilly",
+      EXTRA: "yes",
+    });
   });
 });

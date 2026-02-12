@@ -8,6 +8,8 @@ import type {
 } from "./types";
 import { ParseError } from "./types";
 
+const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+
 export function parseHeader(line: string): EnvFileHeader | null {
   const match = line.match(/^#env-manager:\s*([^\s|]+)\s*\|\s*(.+)$/);
   if (!match) return null;
@@ -110,17 +112,51 @@ export function parseSchemaComment(comment: string): {
   };
 }
 
+function isEscaped(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (let i = index - 1; i >= 0 && value[i] === "\\"; i--) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+
+function isWrappedInQuotes(value: string, quote: "'" | '"'): boolean {
+  return (
+    value.length >= 2 &&
+    value.startsWith(quote) &&
+    value.endsWith(quote) &&
+    !isEscaped(value, value.length - 1)
+  );
+}
+
+function unescapeQuotedValue(value: string, quote: "'" | '"'): string {
+  let result = "";
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === "\\" && i + 1 < value.length) {
+      const next = value[i + 1];
+      if (next === "\\" || next === quote) {
+        result += next;
+        i++;
+        continue;
+      }
+    }
+    result += ch;
+  }
+  return result;
+}
+
 function findInlineCommentIndex(value: string): number {
   let inSingle = false;
   let inDouble = false;
 
   for (let i = 0; i < value.length; i++) {
     const ch = value[i];
-    if (ch === "'" && !inDouble) {
+    if (ch === "'" && !inDouble && !isEscaped(value, i)) {
       inSingle = !inSingle;
       continue;
     }
-    if (ch === '"' && !inSingle) {
+    if (ch === '"' && !inSingle && !isEscaped(value, i)) {
       inDouble = !inDouble;
       continue;
     }
@@ -155,10 +191,10 @@ function parseEnvLine(line: string): {
   rest = rest.trim();
   if (rest === "") {
     value = null;
-  } else if (rest.startsWith("'") && rest.endsWith("'")) {
-    value = rest.slice(1, -1);
-  } else if (rest.startsWith('"') && rest.endsWith('"')) {
-    value = rest.slice(1, -1);
+  } else if (isWrappedInQuotes(rest, "'")) {
+    value = unescapeQuotedValue(rest.slice(1, -1), "'");
+  } else if (isWrappedInQuotes(rest, '"')) {
+    value = unescapeQuotedValue(rest.slice(1, -1), '"');
   } else {
     value = rest;
   }
@@ -260,10 +296,11 @@ export function parseEnvValues(content: string): EnvValues {
     value = value.trim();
 
     if (
-      (value.startsWith("'") && value.endsWith("'")) ||
-      (value.startsWith('"') && value.endsWith('"'))
+      isWrappedInQuotes(value, "'") ||
+      isWrappedInQuotes(value, '"')
     ) {
-      value = value.slice(1, -1);
+      const quote = value[0] as "'" | '"';
+      value = unescapeQuotedValue(value.slice(1, -1), quote);
     }
 
     values[name] = value;
@@ -285,6 +322,53 @@ export function generateEnvContent(
     const schemaStr = formatSchemaComment(s);
     const value = values[s.name] ?? s.defaultValue ?? "";
     lines.push(`${s.name}=${value} ${schemaStr}`);
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+function escapeSingleQuotedValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function formatLocalValue(value: string): string {
+  if (NUMERIC_VALUE_PATTERN.test(value)) {
+    return value;
+  }
+  return `'${escapeSingleQuotedValue(value)}'`;
+}
+
+export function generateLocalEnvContent(
+  schema: EnvVarSchema[],
+  values: EnvValues
+): string {
+  const lines: string[] = [];
+  const schemaByName = new Map(schema.map((entry) => [entry.name, entry]));
+  const emitted = new Set<string>();
+
+  for (const entry of schema) {
+    if (!Object.prototype.hasOwnProperty.call(values, entry.name)) {
+      continue;
+    }
+    const value = values[entry.name];
+    lines.push(
+      `${entry.name}=${formatLocalValue(value)} ${formatSchemaComment(entry)}`
+    );
+    emitted.add(entry.name);
+  }
+
+  for (const [name, value] of Object.entries(values)) {
+    if (emitted.has(name)) {
+      continue;
+    }
+    if (schemaByName.has(name)) {
+      continue;
+    }
+    lines.push(`${name}=${formatLocalValue(value)}`);
+  }
+
+  if (lines.length === 0) {
+    return "";
   }
 
   return lines.join("\n") + "\n";

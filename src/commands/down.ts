@@ -1,6 +1,11 @@
 import { createAwsAdapter, secretName } from "../aws";
 import { writeFilesFromPayload } from "../file-sync";
-import { parseEnvFile, parseEnvValues, updateHeaderSyncDate } from "../parser";
+import {
+  generateLocalEnvContent,
+  parseEnvFile,
+  parseEnvValues,
+  updateHeaderSyncDate,
+} from "../parser";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
@@ -32,7 +37,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
   await Bun.write(envPath, updatedSchema);
 
   if (secret.values) {
-    await Bun.write(localPath, secret.values + "\n");
+    await Bun.write(localPath, generateLocalEnvContent(parsed.schema, values));
   }
 
   console.log(`Downloaded ${ctx.project} from AWS Secrets Manager`);

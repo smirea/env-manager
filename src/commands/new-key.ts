@@ -5,9 +5,9 @@ import { getKey, listKeys, listKeyNames } from "../keys";
 import { promptLine } from "../prompt";
 import {
   appendSchemaEntry,
+  generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
-  setEnvValue,
   updateHeaderSyncDate,
 } from "../parser";
 import type { CommandContext, SecretPayload } from "../types";
@@ -192,17 +192,21 @@ export async function newKeyCommand(
     );
   }
 
-  let localContent = "";
+  let localValues: Record<string, string> = {};
   const localFile = Bun.file(localPath);
   if (await localFile.exists()) {
-    localContent = await localFile.text();
+    localValues = parseEnvValues(await localFile.text());
   }
-  localContent = setEnvValue(localContent, keyName, key);
+  localValues[keyName] = key;
+  const updatedParsed = parseEnvFile(envContent);
+  const localContent = generateLocalEnvContent(
+    updatedParsed.schema,
+    localValues
+  );
 
   await Bun.write(envPath, envContent);
   await Bun.write(localPath, localContent);
 
-  const updatedParsed = parseEnvFile(envContent);
   const values = parseEnvValues(localContent);
   const result = validateEnv(updatedParsed.schema, values);
   assertValid(result);
