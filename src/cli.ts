@@ -371,6 +371,9 @@ interface NewKeyArgs extends ProjectArgs {
   key?: string;
   list: boolean;
   yes: boolean;
+  name?: string;
+  credit?: number;
+  expiration?: string;
 }
 
 const newKeyCmd: CommandModule<any, any> = {
@@ -382,7 +385,8 @@ const newKeyCmd: CommandModule<any, any> = {
       yargs
         .positional("key", {
           type: "string",
-          description: "Known key name to create (e.g., ANTHROPIC_API_KEY)",
+          description:
+            "Known key name to create (e.g., ANTHROPIC_API_KEY, OPENROUTER_API_KEY)",
         })
         .option("list", {
           alias: "l",
@@ -395,6 +399,21 @@ const newKeyCmd: CommandModule<any, any> = {
           type: "boolean",
           default: false,
           description: "Accept defaults for prompts",
+        })
+        .option("name", {
+          type: "string",
+          description:
+            "OpenRouter key display name (default: project name; OPENROUTER_API_KEY only)",
+        })
+        .option("credit", {
+          type: "number",
+          description:
+            "OpenRouter key credit limit in USD (OPENROUTER_API_KEY only)",
+        })
+        .option("expiration", {
+          type: "string",
+          description:
+            "OpenRouter key expiration (UTC ISO-8601, e.g., 2027-12-31T23:59:59Z; OPENROUTER_API_KEY only)",
         })
     ) as unknown as Argv<NewKeyArgs>,
   handler: async (argv) => {
@@ -411,6 +430,9 @@ const newKeyCmd: CommandModule<any, any> = {
     await checkAwsCredentials();
     await newKeyCommand(createContext(args), args.key, {
       assumeYes: args.yes,
+      name: args.name,
+      credit: args.credit,
+      expiration: args.expiration,
     });
   },
 };

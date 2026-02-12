@@ -9,6 +9,39 @@ const envSchema = z.object({
   OPENROUTER_MANAGEMENT_KEY: z.string().regex(/^sk-or-/),
 });
 
-const env = envSchema.parse(process.env);
+type Env = z.infer<typeof envSchema>;
+
+let cachedEnv: Env | null = null;
+
+function runtimeEnv(): Record<string, string | undefined> {
+  return process.env as Record<string, string | undefined>;
+}
+
+export function readEnv(): Env {
+  if (cachedEnv === null) {
+    cachedEnv = envSchema.parse(runtimeEnv());
+  }
+  return cachedEnv;
+}
+
+export function getEnvVar(name: string): string | undefined {
+  return runtimeEnv()[name];
+}
+
+export function setEnvVarIfUnset(name: string, value: string): void {
+  if (runtimeEnv()[name] === undefined) {
+    runtimeEnv()[name] = value;
+    cachedEnv = null;
+  }
+}
+
+const env = new Proxy({} as Env, {
+  get(_target, property) {
+    if (typeof property !== "string") {
+      return undefined;
+    }
+    return readEnv()[property as keyof Env];
+  },
+}) as Env;
 
 export default env;

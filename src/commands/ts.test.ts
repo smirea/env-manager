@@ -33,4 +33,24 @@ describe("ts command", () => {
       );
     });
   });
+
+  test("generates centralized env helpers", async () => {
+    await withTempDir(async (dir) => {
+      const envPath = path.join(dir, ".env");
+      await writeFile(
+        envPath,
+        `#env-manager: test-project | 2025-01-01T00:00:00Z\n\nFOO=bar # {string}\n`
+      );
+
+      await tsCommand(
+        { project: "test-project", cwd: dir },
+        path.join(dir, "env.ts")
+      );
+
+      const output = await readFile(path.join(dir, "env.ts"), "utf8");
+      expect(output).toContain("export function readEnv(): Env {");
+      expect(output).toContain("export function getEnvVar(name: string):");
+      expect(output).toContain("export function setEnvVarIfUnset(");
+    });
+  });
 });

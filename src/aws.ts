@@ -6,6 +6,7 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
+import { getEnvVar } from "./env";
 import type { SecretPayload } from "./types";
 import { AwsError } from "./types";
 
@@ -20,7 +21,7 @@ export function secretName(project: string): string {
 }
 
 function getAwsRegion(): string {
-  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+  const region = getEnvVar("AWS_REGION") || getEnvVar("AWS_DEFAULT_REGION");
   if (!region) {
     throw new AwsError(
       "AWS region not configured. Set AWS_REGION or AWS_DEFAULT_REGION."
@@ -36,9 +37,9 @@ function getStaticCredentials():
       sessionToken?: string;
     }
   | null {
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-  const sessionToken = process.env.AWS_SESSION_TOKEN;
+  const accessKeyId = getEnvVar("AWS_ACCESS_KEY_ID");
+  const secretAccessKey = getEnvVar("AWS_SECRET_ACCESS_KEY");
+  const sessionToken = getEnvVar("AWS_SESSION_TOKEN");
 
   if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
     throw new AwsError(

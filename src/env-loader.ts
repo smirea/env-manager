@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { setEnvVarIfUnset } from "./env";
 import { parseEnvValues } from "./parser";
 
 export function loadEnvFromPaths(paths: string[]): void {
@@ -16,9 +17,7 @@ export function loadEnvFromPaths(paths: string[]): void {
       const content = readFileSync(path, "utf8");
       const values = parseEnvValues(content);
       for (const [key, value] of Object.entries(values)) {
-        if (process.env[key] === undefined) {
-          process.env[key] = value;
-        }
+        setEnvVarIfUnset(key, value);
       }
     }
   }
