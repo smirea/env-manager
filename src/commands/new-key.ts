@@ -2,6 +2,7 @@ import { createAwsAdapter, secretName } from "../aws";
 import { collectFilePayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { getKey, listKeys, listKeyNames } from "../keys";
+import type { KeyResolveOptions } from "../keys";
 import { promptLine } from "../prompt";
 import {
   appendSchemaEntry,
@@ -16,6 +17,9 @@ import { assertValid, validateEnv } from "../validator";
 
 type NewKeyOptions = {
   assumeYes?: boolean;
+  name?: string;
+  credit?: number;
+  expiration?: string;
 };
 
 async function promptChoice(
@@ -123,6 +127,26 @@ export async function newKeyCommand(
   options: NewKeyOptions = {}
 ): Promise<void> {
   const assumeYes = options.assumeYes === true;
+  const usingOpenRouterOptions =
+    options.name !== undefined ||
+    options.credit !== undefined ||
+    options.expiration !== undefined;
+
+  if (keyName !== "OPENROUTER_API_KEY" && usingOpenRouterOptions) {
+    throw new EnvManagerError(
+      "--name, --credit, and --expiration are only supported for OPENROUTER_API_KEY."
+    );
+  }
+
+  const resolveOptions: KeyResolveOptions | undefined =
+    keyName === "OPENROUTER_API_KEY"
+      ? {
+          name: options.name,
+          credit: options.credit,
+          expiration: options.expiration,
+        }
+      : undefined;
+
   const keyDef = getKey(keyName);
   if (!keyDef) {
     const available = listKeyNames().join(", ");
@@ -179,11 +203,11 @@ export async function newKeyCommand(
       console.log(`Using ${keyName} from ${GLOBAL_LABEL}`);
     } else {
       console.log(`Creating new ${keyName}...`);
-      key = await keyDef.resolve(ctx.project);
+      key = await keyDef.resolve(ctx.project, resolveOptions);
     }
   } else {
     console.log(`Creating ${keyName}...`);
-    key = await keyDef.resolve(ctx.project);
+    key = await keyDef.resolve(ctx.project, resolveOptions);
   }
 
   if (!keyDef.validate(key)) {

@@ -28,7 +28,7 @@ env-manager <command> [options]
 | `global get [NAME]` | Get a global default env var |
 | `global list` (`global ls`) | List all global default env vars |
 | `global rm <NAME>` | Remove a global default env var |
-| `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`) |
+| `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) |
 | `new-key --list` | List available keys |
 
 ### Options
@@ -37,6 +37,9 @@ env-manager <command> [options]
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: current directory name) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
+| `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
+| `--credit <usd>` | OpenRouter key credit limit in USD (`new-key OPENROUTER_API_KEY` only) |
+| `--expiration <utc-iso>` | OpenRouter key expiration (UTC ISO-8601, `new-key OPENROUTER_API_KEY` only) |
 | `-h, --help` | Show help message |
 
 ## Schema Format
@@ -92,6 +95,8 @@ env-manager global rm ANTHROPIC_API_KEY
 
 ```bash
 env-manager new-key ANTHROPIC_API_KEY
+env-manager new-key OPENROUTER_API_KEY
+env-manager new-key OPENROUTER_API_KEY --name my-app --credit 25 --expiration 2027-12-31T23:59:59Z
 ```
 
 If the key exists in global defaults, you'll be prompted:
@@ -108,6 +113,8 @@ env-manager new-key ANTHROPIC_API_KEY --yes
 ```
 
 New keys are automatically saved to both your current project and global defaults for future reuse.
+
+`OPENROUTER_API_KEY` creation requires `OPENROUTER_MANAGEMENT_KEY` to be present in env-manager's `.env.local`.
 
 ### Available keys
 
@@ -186,7 +193,9 @@ const envSchema = z.object({
   DEBUG: z.coerce.boolean().optional(),
 });
 
-export default envSchema.parse(process.env);
+export function readEnv() {
+  return envSchema.parse(process.env);
+}
 ```
 
 ### 5. Sync with AWS
