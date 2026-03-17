@@ -1,39 +1,40 @@
 #!/usr/bin/env bun
 
-import { realpathSync } from "fs";
-import { basename, dirname, resolve } from "path";
-import { fileURLToPath } from "url";
-import yargs, { type Argv, type CommandModule } from "yargs";
-import { hideBin } from "yargs/helpers";
-import { checkAwsCredentials } from "./aws";
-import { downCommand } from "./commands/down";
+import { realpathSync } from 'fs';
+import { basename, dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+import yargs, { type Argv, type CommandModule } from 'yargs';
+import { hideBin } from 'yargs/helpers';
+import { checkAwsCredentials } from './aws';
+import { downCommand } from './commands/down';
 import {
   globalGetCommand,
   globalListCommand,
   globalRmCommand,
   globalSetCommand,
-} from "./commands/global";
-import { initCommand } from "./commands/init";
-import { listCommand } from "./commands/list";
-import { listKeysCommand, newKeyCommand } from "./commands/new-key";
-import { tsCommand } from "./commands/ts";
-import { upCommand } from "./commands/up";
-import { loadEnvFromPaths } from "./env-loader";
-import type { CommandContext } from "./types";
-import { EnvManagerError } from "./types";
+} from './commands/global';
+import { initCommand } from './commands/init';
+import { listCommand } from './commands/list';
+import { listKeysCommand, newKeyCommand } from './commands/new-key';
+import { printCommand } from './commands/print';
+import { tsCommand } from './commands/ts';
+import { upCommand } from './commands/up';
+import { loadEnvFromPaths } from './env-loader';
+import type { CommandContext } from './types';
+import { EnvManagerError } from './types';
 
-const RESERVED_PROJECT_NAMES = ["default", "global"];
+const RESERVED_PROJECT_NAMES = ['default', 'global'];
 const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
 const SUPPORTED_SCHEMA_TYPES = [
-  "string",
-  "int",
-  "float",
-  "bool",
-  "url",
-  "email",
-  "file",
+  'string',
+  'int',
+  'float',
+  'bool',
+  'url',
+  'email',
+  'file',
 ];
-const SUPPORTED_SCHEMA_VALIDATORS = ["min(n)", "max(n)", "format(/regex/)"];
+const SUPPORTED_SCHEMA_VALIDATORS = ['min(n)', 'max(n)', 'format(/regex/)'];
 const HELP_FOOTER = `Supported schema formats:
   Types: ${SUPPORTED_SCHEMA_TYPES.join(", ")}
   Validators: ${SUPPORTED_SCHEMA_VALIDATORS.join(", ")}
@@ -59,7 +60,7 @@ function validateProjectName(project: string, command: string): void {
       `Invalid project name "${project}". Project names cannot include spaces or "|".`
     );
   }
-  const commandsRestrictingDefault = ["up", "down", "init"];
+  const commandsRestrictingDefault = ['up', 'down', 'init'];
   if (
     commandsRestrictingDefault.includes(command) &&
     RESERVED_PROJECT_NAMES.includes(project)
@@ -99,7 +100,7 @@ const downCmd: CommandModule<any, any> = {
     withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
     const args = argv as unknown as ProjectArgs;
-    validateProjectName(args.project, "down");
+    validateProjectName(args.project, 'down');
     await checkAwsCredentials();
     await downCommand(createContext(args));
   },
@@ -117,7 +118,7 @@ const tsCmd: CommandModule<any, any> = {
     withProjectOption(
       yargs.positional("path", {
         type: "string",
-        default: "src/env.ts",
+        default: 'src/env.ts',
         description: "Output path for generated file",
       })
     ) as Argv<TsArgs>,
@@ -146,7 +147,7 @@ const initCmd: CommandModule<any, any> = {
     ) as Argv<InitArgs>,
   handler: async (argv) => {
     const args = argv as unknown as InitArgs;
-    validateProjectName(args.project, "init");
+    validateProjectName(args.project, 'init');
     await checkAwsCredentials();
     await initCommand(createContext(args), { assumeYes: args.yes });
   },
@@ -160,6 +161,33 @@ const listCmd: CommandModule<any, any> = {
   handler: async () => {
     await checkAwsCredentials();
     await listCommand();
+  },
+};
+
+interface PrintArgs {
+  project?: string;
+}
+
+const printCmd: CommandModule<any, any> = {
+  command: 'print [project]',
+  describe:
+    'Print the stored .env, .env.local, and file payloads for a project',
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs
+      .positional('project', {
+        type: 'string',
+        description: 'Project name',
+      })
+      .option('project', {
+        alias: 'p',
+        type: 'string',
+        description: 'Project name',
+      }) as Argv<PrintArgs>,
+  handler: async (argv) => {
+    const project = (argv as PrintArgs).project ?? basename(process.cwd());
+    validateProjectName(project, 'print');
+    await checkAwsCredentials();
+    await printCommand(createContext({ project }));
   },
 };
 
@@ -179,9 +207,9 @@ function parseGlobalSetInput(argv: GlobalSetArgs): {
   location?: string;
 } {
   const rawArgs = hideBin(process.argv);
-  const globalIndex = rawArgs.indexOf("global");
-  let setIndex = rawArgs.indexOf("set");
-  if (globalIndex !== -1 && rawArgs[globalIndex + 1] === "set") {
+  const globalIndex = rawArgs.indexOf('global');
+  let setIndex = rawArgs.indexOf('set');
+  if (globalIndex !== -1 && rawArgs[globalIndex + 1] === 'set') {
     setIndex = globalIndex + 1;
   }
   const argsAfter = setIndex === -1 ? rawArgs : rawArgs.slice(setIndex + 1);
@@ -198,15 +226,15 @@ function parseGlobalSetInput(argv: GlobalSetArgs): {
 
   for (let i = 0; i < argsAfter.length; i++) {
     const arg = argsAfter[i];
-    if (arg === "--") {
+    if (arg === '--') {
       positional.push(...argsAfter.slice(i + 1));
       break;
     }
-    if (arg.startsWith("--")) {
+    if (arg.startsWith('--')) {
       if (
-        arg.startsWith("--name=") ||
-        arg.startsWith("--value=") ||
-        arg.startsWith("--location=")
+        arg.startsWith('--name=') ||
+        arg.startsWith('--value=') ||
+        arg.startsWith('--location=')
       ) {
         flagsUsed = true;
         continue;
@@ -218,7 +246,7 @@ function parseGlobalSetInput(argv: GlobalSetArgs): {
       }
       continue;
     }
-    if (arg.startsWith("-")) {
+    if (arg.startsWith('-')) {
       if (consumeFlagValue(arg)) {
         flagsUsed = true;
         i++;
@@ -295,7 +323,7 @@ const globalSetCmd: CommandModule<any, any> = {
   handler: async (argv) => {
     await checkAwsCredentials();
     const input = parseGlobalSetInput(argv as GlobalSetArgs);
-    await globalSetCommand(createContext({ project: "default" }), input);
+    await globalSetCommand(createContext({ project: 'default' }), input);
   },
 };
 
@@ -309,7 +337,7 @@ const globalGetCmd: CommandModule<any, any> = {
     }) as Argv<GlobalGetArgs>,
   handler: async (argv) => {
     await checkAwsCredentials();
-    await globalGetCommand(createContext({ project: "default" }), argv.name);
+    await globalGetCommand(createContext({ project: 'default' }), argv.name);
   },
 };
 
@@ -320,7 +348,7 @@ const globalListCmd: CommandModule<any, any> =
     describe: "List global default env vars",
     handler: async () => {
       await checkAwsCredentials();
-      await globalListCommand(createContext({ project: "default" }));
+      await globalListCommand(createContext({ project: 'default' }));
     },
   };
 
@@ -345,7 +373,7 @@ const globalRmCmd: CommandModule<any, any> = {
       .demandOption("name", "Name required") as Argv<GlobalRmArgs>,
   handler: async (argv) => {
     if (!argv.name) {
-      throw new EnvManagerError("Usage: env-manager global rm <name>");
+      throw new EnvManagerError('Usage: env-manager global rm <name>');
     }
     await checkAwsCredentials();
     await globalRmCommand(createContext({ project: "default" }), argv.name);
@@ -448,7 +476,7 @@ async function run() {
   const entryDirs = new Set<string>();
   const candidates = [
     process.argv[1],
-    typeof Bun !== "undefined" ? Bun.main : undefined,
+    typeof Bun !== 'undefined' ? Bun.main : undefined,
     fileURLToPath(import.meta.url),
   ];
 
@@ -458,7 +486,7 @@ async function run() {
       const resolved = realpathSync(candidate);
       const dir = dirname(resolved);
       entryDirs.add(dir);
-      entryDirs.add(resolve(dir, ".."));
+      entryDirs.add(resolve(dir, '..'));
     } catch {
       continue;
     }
@@ -471,21 +499,22 @@ async function run() {
     tsCmd,
     initCmd,
     listCmd,
+    printCmd,
     globalCmd,
     newKeyCmd,
   ];
   await yargs(hideBin(process.argv))
-    .scriptName("env-manager")
+    .scriptName('env-manager')
     .usage(
-      "$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync."
+      '$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync.'
     )
     .command(rootCommands as Array<CommandModule<{}, any>>)
-    .demandCommand(1, "Please specify a command")
+    .demandCommand(1, 'Please specify a command')
     .strict()
     .version(false)
     .epilog(HELP_FOOTER)
     .help()
-    .alias("h", "help")
+    .alias('h', 'help')
     .parse();
 }
 

@@ -24,6 +24,7 @@ env-manager <command> [options]
 | `down` | Download `.env` and `.env.local` from AWS |
 | `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
+| `print [project]` | Print the stored `.env`, `.env.local`, and file contents for a project |
 | `global set` | Set a global default env var |
 | `global get [NAME]` | Get a global default env var |
 | `global list` (`global ls`) | List all global default env vars |
@@ -218,6 +219,10 @@ env-manager up
 
 # Download from AWS Secrets Manager
 env-manager down
+
+# Print the stored secret payload for a project
+env-manager print
+env-manager print my-project
 ```
 
 ## AWS Configuration
