@@ -4,11 +4,10 @@ import {
   ListSecretsCommand,
   PutSecretValueCommand,
   SecretsManagerClient,
-} from "@aws-sdk/client-secrets-manager";
-import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
-import { getEnvVar } from "./env";
-import type { SecretPayload } from "./types";
-import { AwsError } from "./types";
+} from '@aws-sdk/client-secrets-manager';
+import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
+import type { SecretPayload } from './types';
+import { AwsError } from './types';
 
 export interface AwsAdapter {
   getSecret(name: string): Promise<SecretPayload | null>;
@@ -21,10 +20,10 @@ export function secretName(project: string): string {
 }
 
 function getAwsRegion(): string {
-  const region = getEnvVar("AWS_REGION") || getEnvVar("AWS_DEFAULT_REGION");
+  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
   if (!region) {
     throw new AwsError(
-      "AWS region not configured. Set AWS_REGION or AWS_DEFAULT_REGION."
+      'AWS region not configured. Set AWS_REGION or AWS_DEFAULT_REGION.'
     );
   }
   return region;
@@ -37,13 +36,13 @@ function getStaticCredentials():
       sessionToken?: string;
     }
   | null {
-  const accessKeyId = getEnvVar("AWS_ACCESS_KEY_ID");
-  const secretAccessKey = getEnvVar("AWS_SECRET_ACCESS_KEY");
-  const sessionToken = getEnvVar("AWS_SESSION_TOKEN");
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const sessionToken = process.env.AWS_SESSION_TOKEN;
 
   if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
     throw new AwsError(
-      "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must both be set."
+      'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must both be set.'
     );
   }
 
@@ -55,8 +54,8 @@ function getStaticCredentials():
 }
 
 function formatAwsError(err: unknown): string {
-  if (err && typeof err === "object") {
-    const name = (err as { name?: string }).name ?? "UnknownError";
+  if (err && typeof err === 'object') {
+    const name = (err as { name?: string }).name ?? 'UnknownError';
     const message = (err as { message?: string }).message ?? String(err);
     return `${name}: ${message}`;
   }
@@ -66,8 +65,8 @@ function formatAwsError(err: unknown): string {
 function isResourceNotFound(err: unknown): boolean {
   return (
     !!err &&
-    typeof err === "object" &&
-    (err as { name?: string }).name === "ResourceNotFoundException"
+    typeof err === 'object' &&
+    (err as { name?: string }).name === 'ResourceNotFoundException'
   );
 }
 
@@ -89,7 +88,7 @@ class AwsSdkAdapter implements AwsAdapter {
         new GetSecretValueCommand({ SecretId: name })
       );
       if (!result.SecretString) {
-        throw new AwsError("Secret is missing SecretString payload.");
+        throw new AwsError('Secret is missing SecretString payload.');
       }
       try {
         return JSON.parse(result.SecretString) as SecretPayload;
@@ -135,7 +134,7 @@ class AwsSdkAdapter implements AwsAdapter {
       do {
         const result = await this.secrets.send(
           new ListSecretsCommand({
-            Filters: [{ Key: "name", Values: [prefix] }],
+            Filters: [{ Key: 'name', Values: [prefix] }],
             NextToken: nextToken,
           })
         );

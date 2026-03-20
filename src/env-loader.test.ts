@@ -10,7 +10,6 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { getEnvVar } from './env';
 import { loadEnvFromPaths, loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -48,9 +47,9 @@ describe('env loader', () => {
       try {
         loadOwnEnvFromPaths([packageRoot]);
 
-        expect(getEnvVar('AWS_REGION')).toBe('from-dot-env-local');
-        expect(getEnvVar('SHARED_KEY')).toBe('from-dot-env');
-        expect(getEnvVar('AWS_ACCESS_KEY_ID')).toBe('own-access-key');
+        expect(process.env.AWS_REGION).toBe('from-dot-env-local');
+        expect(process.env.SHARED_KEY).toBe('from-dot-env');
+        expect(process.env.AWS_ACCESS_KEY_ID).toBe('own-access-key');
       } finally {
         restoreEnvVar('AWS_REGION', previousRegion);
         restoreEnvVar('SHARED_KEY', previousSharedKey);
@@ -70,7 +69,7 @@ describe('env loader', () => {
 
       try {
         loadEnvFromPaths([packageRoot]);
-        expect(getEnvVar('AWS_REGION')).toBe('preloaded');
+        expect(process.env.AWS_REGION).toBe('preloaded');
       } finally {
         restoreEnvVar('AWS_REGION', previousRegion);
       }

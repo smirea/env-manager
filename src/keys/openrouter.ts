@@ -1,4 +1,3 @@
-import { readEnv } from "../env";
 import { EnvManagerError } from "../types";
 import type { KeyDefinition, KeyResolveOptions } from "./index";
 
@@ -111,7 +110,7 @@ export const openRouterKey: KeyDefinition = {
     projectName: string,
     options?: KeyResolveOptions
   ): Promise<string> {
-    const env = readEnv();
+    const { default: env } = await import('../env');
     const normalized = normalizeOpenRouterOptions(projectName, options);
     const response = await fetch(OPENROUTER_CREATE_KEY_URL, {
       method: "POST",

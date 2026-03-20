@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { setEnvVar, setEnvVarIfUnset } from './env';
 import { parseEnvValues } from './parser';
 import { EnvManagerError } from './types';
 
@@ -49,10 +48,8 @@ function loadEnvFromPathsWithMode(
       const content = readFileSync(path, 'utf8');
       const values = parseEnvValues(content);
       for (const [key, value] of Object.entries(values)) {
-        if (overrideExisting) {
-          setEnvVar(key, value);
-        } else {
-          setEnvVarIfUnset(key, value);
+        if (overrideExisting || process.env[key] === undefined) {
+          process.env[key] = value;
         }
       }
     }
