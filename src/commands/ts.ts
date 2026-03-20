@@ -29,10 +29,14 @@ export function getEnvVar(name: string): string | undefined {
   return runtimeEnv()[name];
 }
 
+export function setEnvVar(name: string, value: string): void {
+  runtimeEnv()[name] = value;
+  cachedEnv = null;
+}
+
 export function setEnvVarIfUnset(name: string, value: string): void {
   if (runtimeEnv()[name] === undefined) {
-    runtimeEnv()[name] = value;
-    cachedEnv = null;
+    setEnvVar(name, value);
   }
 }
 

@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
 
-import { realpathSync } from 'fs';
-import { basename, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { basename } from 'path';
 import yargs, { type Argv, type CommandModule } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { checkAwsCredentials } from './aws';
@@ -19,7 +17,7 @@ import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
 import { tsCommand } from './commands/ts';
 import { upCommand } from './commands/up';
-import { loadEnvFromPaths } from './env-loader';
+import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
 import type { CommandContext } from './types';
 import { EnvManagerError } from './types';
 
@@ -473,26 +471,7 @@ const newKeyCmd: CommandModule<any, any> = {
 };
 
 async function run() {
-  const entryDirs = new Set<string>();
-  const candidates = [
-    process.argv[1],
-    typeof Bun !== 'undefined' ? Bun.main : undefined,
-    fileURLToPath(import.meta.url),
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    try {
-      const resolved = realpathSync(candidate);
-      const dir = dirname(resolved);
-      entryDirs.add(dir);
-      entryDirs.add(resolve(dir, '..'));
-    } catch {
-      continue;
-    }
-  }
-
-  loadEnvFromPaths([...entryDirs]);
+  loadOwnEnvFromPaths(resolveOwnEnvPaths(import.meta.url));
   const rootCommands: Array<CommandModule<any, any>> = [
     upCmd,
     downCmd,
