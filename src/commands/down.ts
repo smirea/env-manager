@@ -31,8 +31,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
 
   await writeFilesFromPayload(parsed.schema, values, secret.files, ctx.cwd);
 
-  const now = new Date().toISOString();
-  const updatedSchema = updateHeaderSyncDate(secret.schema, now);
+  const updatedSchema = updateHeaderSyncDate(secret.schema, secret.syncDate);
 
   await Bun.write(envPath, updatedSchema);
 
