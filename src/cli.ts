@@ -105,7 +105,8 @@ const downCmd: CommandModule<any, any> = {
 };
 
 interface TsArgs extends ProjectArgs {
-  path: string;
+  path?: string;
+  force: boolean;
 }
 
 const tsCmd: CommandModule<any, any> = {
@@ -114,15 +115,21 @@ const tsCmd: CommandModule<any, any> = {
     "Generate a Zod-validated env.ts from the .env schema for typed access",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      yargs.positional("path", {
-        type: "string",
-        default: 'src/env.ts',
-        description: "Output path for generated file",
-      })
+      yargs
+        .positional("path", {
+          type: "string",
+          description: "Output path for generated file (default: src/env.ts)",
+        })
+        .option("force", {
+          alias: "f",
+          type: "boolean",
+          default: false,
+          description: "Overwrite ts path stored in .env",
+        })
     ) as Argv<TsArgs>,
   handler: async (argv) => {
     const args = argv as unknown as TsArgs;
-    await tsCommand(createContext(args), args.path);
+    await tsCommand(createContext(args), args.path, { force: args.force });
   },
 };
 
