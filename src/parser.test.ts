@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  envContentEqualIgnoringSyncDate,
+  envValuesEqual,
   generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
@@ -7,14 +9,16 @@ import {
   parseHeader,
   parseSchemaComment,
   parseValidators,
+  serializeEnvValues,
   updateHeaderSyncDate,
+  upsertHeaderSyncDate,
 } from "./parser";
 import type { FormatValidator } from "./types";
 
 describe("parseHeader", () => {
   test("parses valid header", () => {
     const result = parseHeader(
-      "#env-manager: my-project | 2025-01-15T10:30:00-05:00"
+      "# env-manager: my-project | 2025-01-15T10:30:00-05:00"
     );
     expect(result).toEqual({
       project: "my-project",
@@ -29,7 +33,7 @@ describe("parseHeader", () => {
 
   test("handles project names with dashes and underscores", () => {
     const result = parseHeader(
-      "#env-manager: my_cool-project | 2025-01-15T10:30:00Z"
+      "# env-manager: my_cool-project | 2025-01-15T10:30:00Z"
     );
     expect(result?.project).toBe("my_cool-project");
   });
@@ -183,7 +187,7 @@ describe("parseFormatRegex", () => {
 
 describe("parseEnvFile", () => {
   test("parses complete env file", () => {
-    const content = `#env-manager: test-project | 2025-01-15T10:30:00-05:00
+    const content = `# env-manager: test-project | 2025-01-15T10:30:00-05:00
 
 FOO= # {optional float}
 # {string}
@@ -229,7 +233,7 @@ PORT=3000 # {int:min(3000),max(10000)}
   test("finds header after leading comments", () => {
     const content = `# comment
 # another
-#env-manager: test-project | 2025-01-15T10:30:00-05:00
+# env-manager: test-project | 2025-01-15T10:30:00-05:00
 
 FOO=bar # {string}
 `;
@@ -356,7 +360,7 @@ BAR='C:\\\\secrets\\\\key'
 describe("updateHeaderSyncDate", () => {
   test("updates header after leading comments", () => {
     const input = `# comment
-#env-manager: demo | 2025-01-01T00:00:00Z
+# env-manager: demo | 2025-01-01T00:00:00Z
 
 FOO=bar
 `;
@@ -365,8 +369,40 @@ FOO=bar
       "2025-02-01T00:00:00Z"
     );
     expect(updated.split("\n")[1]).toBe(
-      "#env-manager: demo | 2025-02-01T00:00:00Z"
+      "# env-manager: demo | 2025-02-01T00:00:00Z"
     );
+  });
+
+  test("adds a header when one is missing", () => {
+    const updated = upsertHeaderSyncDate(
+      "FOO=bar\n",
+      "demo",
+      "2025-02-01T00:00:00Z"
+    );
+
+    expect(updated).toBe(`# env-manager: demo | 2025-02-01T00:00:00Z
+
+FOO=bar
+`);
+  });
+
+  test("compares env content without treating the header date as structure", () => {
+    const first = `# env-manager: demo | 2025-01-01T00:00:00Z
+
+FOO=bar # {string}
+`;
+    const second = `# env-manager: demo | 2025-02-01T00:00:00Z
+
+FOO=bar # {string}
+`;
+    const changed = `# env-manager: demo | 2025-02-01T00:00:00Z
+
+FOO=bar # {string}
+PORT=3000 # {int}
+`;
+
+    expect(envContentEqualIgnoringSyncDate(first, second)).toBe(true);
+    expect(envContentEqualIgnoringSyncDate(first, changed)).toBe(false);
   });
 });
 
@@ -447,5 +483,39 @@ EXTRA='yes'
       NAME: "C:\\O'Reilly",
       EXTRA: "yes",
     });
+  });
+
+  test("can include a value sync header", () => {
+    const content = generateLocalEnvContent(
+      [
+        {
+          name: "API_KEY",
+          type: "string",
+          optional: false,
+          validators: [],
+          defaultValue: null,
+          lineNumber: 1,
+        },
+      ],
+      { API_KEY: "sk-test" },
+      { project: "demo", syncDate: "2025-02-01T00:00:00Z" }
+    );
+
+    expect(content).toBe(`# env-manager: demo | 2025-02-01T00:00:00Z
+
+API_KEY='sk-test' # {string}
+`);
+  });
+});
+
+describe("env value helpers", () => {
+  test("serializes values and compares by key/value instead of order", () => {
+    expect(serializeEnvValues({ FOO: "one", BAR: "two" })).toBe(
+      "FOO=one\nBAR=two"
+    );
+    expect(
+      envValuesEqual({ FOO: "one", BAR: "two" }, { BAR: "two", FOO: "one" })
+    ).toBe(true);
+    expect(envValuesEqual({ FOO: "one" }, { FOO: "two" })).toBe(false);
   });
 });

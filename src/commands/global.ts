@@ -2,10 +2,14 @@ import { createAwsAdapter, secretName } from "../aws";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import {
   appendSchemaEntry,
+  envContentEqualIgnoringSyncDate,
+  envValuesEqual,
   generateEnvContent,
   parseEnvFile,
   parseEnvValues,
+  serializeEnvValues,
   updateHeaderSyncDate,
+  upsertHeaderSyncDate,
 } from "../parser";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
@@ -34,14 +38,9 @@ function ensureValidName(name: string): void {
 function ensureGlobalSchema(schema: string, now: string): string {
   const parsed = parseEnvFile(schema);
   if (parsed.header) {
-    return updateHeaderSyncDate(schema, now);
+    return schema;
   }
-  const header = `#env-manager: ${GLOBAL_PROJECT} | ${now}`;
-  const trimmed = schema.trim();
-  if (trimmed === "") {
-    return `${header}\n\n`;
-  }
-  return `${header}\n\n${schema}`;
+  return upsertHeaderSyncDate(schema, GLOBAL_PROJECT, now);
 }
 
 function formatTable(rows: GlobalEntry[]): string {
@@ -120,10 +119,17 @@ export async function globalSetCommand(
   if (!existsInSchema) {
     schema = appendSchemaEntry(schema, name, "string");
   }
-  schema = updateHeaderSyncDate(schema, now);
+  const schemaChanged =
+    !existing ||
+    !envContentEqualIgnoringSyncDate(schema, existing.schema);
+  if (schemaChanged) {
+    schema = updateHeaderSyncDate(schema, now);
+  }
 
   const values = parseEnvValues(existing?.values ?? "");
+  const previousValues = { ...values };
   values[name] = value;
+  const valuesChanged = !envValuesEqual(values, previousValues);
 
   const locations = { ...existing?.locations };
   if (location !== "") {
@@ -132,10 +138,8 @@ export async function globalSetCommand(
 
   const payload: SecretPayload = {
     schema,
-    values: Object.entries(values)
-      .map(([key, val]) => `${key}=${val}`)
-      .join("\n"),
-    syncDate: now,
+    values: serializeEnvValues(values),
+    syncDate: valuesChanged ? now : existing?.syncDate ?? now,
     files: existing?.files,
     locations,
   };
@@ -203,21 +207,24 @@ export async function globalRmCommand(
   delete locations[trimmed];
 
   const parsed = parseEnvFile(secret.schema);
-  const filteredSchema = parsed.schema.filter((s) => s.name !== trimmed);
   const now = new Date().toISOString();
-  const header = parsed.header ?? { project: GLOBAL_PROJECT, syncDate: now };
-  header.syncDate = now;
-
-  const schema =
-    filteredSchema.length === 0
-      ? `#env-manager: ${header.project} | ${header.syncDate}\n\n`
-      : generateEnvContent(header, filteredSchema, {});
+  const schemaEntryExists = parsed.schema.some((s) => s.name === trimmed);
+  let schema = secret.schema;
+  if (schemaEntryExists) {
+    const filteredSchema = parsed.schema.filter((s) => s.name !== trimmed);
+    const header = {
+      project: parsed.header?.project ?? GLOBAL_PROJECT,
+      syncDate: now,
+    };
+    schema =
+      filteredSchema.length === 0
+        ? upsertHeaderSyncDate("", header.project, header.syncDate)
+        : generateEnvContent(header, filteredSchema, {});
+  }
 
   const payload: SecretPayload = {
     schema,
-    values: Object.entries(values)
-      .map(([key, val]) => `${key}=${val}`)
-      .join("\n"),
+    values: serializeEnvValues(values),
     syncDate: now,
     files: secret.files,
     locations: Object.keys(locations).length > 0 ? locations : undefined,

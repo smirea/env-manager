@@ -7,7 +7,7 @@ import type { SecretPayload } from '../types';
 
 function createPayload(overrides: Partial<SecretPayload> = {}): SecretPayload {
   return {
-    schema: `#env-manager: demo | 2026-03-07T00:00:00Z
+    schema: `# env-manager: demo | 2026-03-07T00:00:00Z
 
 API_KEY= # {string}
 CERT=secrets/cert.pem # {file}
@@ -46,8 +46,9 @@ describe('print command formatting', () => {
     const output = formatProjectPrintOutput('demo', createPayload());
 
     expect(output).toContain('project: demo');
-    expect(output).toContain('.env\n#env-manager: demo | 2026-03-07T00:00:00Z');
-    expect(output).toContain(".env.local\nAPI_KEY='secret' # {string}");
+    expect(output).toContain('.env\n# env-manager: demo | 2026-03-07T00:00:00Z');
+    expect(output).toContain('.env.local\n# env-manager: demo | 2026-03-07T00:00:00Z');
+    expect(output).toContain("API_KEY='secret' # {string}");
     expect(output).toContain("EXTRA_CERT='config/extra.pem' # {file}");
     expect(output).toContain('files\nname: CERT\npath: secrets/cert.pem\ncontents:\nprimary cert');
     expect(output).toContain(

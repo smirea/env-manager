@@ -9,7 +9,7 @@ utility to manage my own environment variables for all my personal projects
     schema + defaults are embedded as comments in the `.env` file. format: `# {optional?, type:validators?}`. example:
 
     ```
-    #env-manager: project-name | 2025-01-15T10:30:00-05:00
+    # env-manager: project-name | 2025-01-15T10:30:00-05:00
 
     FOO= # {optional float}
     # {string}
@@ -25,9 +25,9 @@ utility to manage my own environment variables for all my personal projects
 
 3. cli script
 
-    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and `.env.local` values, updates sync date. defaults project to basename of cwd
+    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and `.env.local` values. `.env` date only changes when the schema/template changes from AWS; `.env.local` date only changes when values change. defaults project to basename of cwd
 
-    3.2. `env-manager down [-p --project=<name>]` - syncs both `.env` and `.env.local` from aws, updates sync date
+    3.2. `env-manager down [-p --project=<name>]` - syncs both `.env` and `.env.local` from aws, preserving the stored schema date and writing the stored value date to `.env.local`
 
     3.3. `env-manager ts [path]` - generates typed env file (defaults to `src/env.ts`) with zod schema and `z.parse(process.env)`
 
@@ -79,7 +79,7 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 - validator parsing is strict and rejects unknown or invalid validators
 - header detection tolerates leading non-schema comments before the header
 - file sync only supports UTF-8 text; binary files are rejected
-- latest update is source of truth (up overwrites remote, down overwrites local)
+- latest matching version is source of truth: `.env` tracks schema/template version, `.env.local` tracks value version
 
 ## Generated TypeScript (env-manager ts)
 

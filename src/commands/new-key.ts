@@ -7,10 +7,14 @@ import { OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD } from "../keys/openrouter";
 import { promptLine } from "../prompt";
 import {
   appendSchemaEntry,
+  envContentEqualIgnoringSyncDate,
+  envValuesEqual,
   generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
+  serializeEnvValues,
   updateHeaderSyncDate,
+  upsertHeaderSyncDate,
 } from "../parser";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
@@ -141,7 +145,7 @@ async function saveToGlobal(
   const now = new Date().toISOString();
 
   if (!secret) {
-    const header = `#env-manager: ${GLOBAL_PROJECT} | ${now}\n\n`;
+    const header = `# env-manager: ${GLOBAL_PROJECT} | ${now}\n\n`;
     const locations = location ? { [keyName]: location } : undefined;
     secret = {
       schema: header + `${keyName}= # {${schemaType}}\n`,
@@ -151,15 +155,27 @@ async function saveToGlobal(
     };
   } else {
     let schema = secret.schema;
-    const parsed = parseEnvFile(schema);
+    let parsed = parseEnvFile(schema);
+    if (!parsed.header) {
+      schema = upsertHeaderSyncDate(schema, GLOBAL_PROJECT, now);
+      parsed = parseEnvFile(schema);
+    }
     const existsInSchema = parsed.schema.some((s) => s.name === keyName);
     if (!existsInSchema) {
       schema = appendSchemaEntry(schema, keyName, schemaType);
     }
-    schema = updateHeaderSyncDate(schema, now);
+    const schemaChanged = !envContentEqualIgnoringSyncDate(
+      schema,
+      secret.schema
+    );
+    if (schemaChanged) {
+      schema = updateHeaderSyncDate(schema, now);
+    }
 
     const values = parseEnvValues(secret.values);
+    const previousValues = { ...values };
     values[keyName] = keyValue;
+    const valuesChanged = !envValuesEqual(values, previousValues);
 
     const locations = { ...secret.locations };
     if (location) {
@@ -168,10 +184,8 @@ async function saveToGlobal(
 
     secret = {
       schema,
-      values: Object.entries(values)
-        .map(([k, v]) => `${k}=${v}`)
-        .join("\n"),
-      syncDate: now,
+      values: serializeEnvValues(values),
+      syncDate: valuesChanged ? now : secret.syncDate,
       files: secret.files,
       locations: Object.keys(locations).length > 0 ? locations : undefined,
     };
@@ -226,6 +240,7 @@ export async function newKeyCommand(
   }
 
   let envContent = await envFile.text();
+  let envContentChanged = false;
   const parsed = parseEnvFile(envContent);
 
   if (!parsed.header) {
@@ -243,9 +258,11 @@ export async function newKeyCommand(
   if (!existsInSchema) {
     console.log(`Adding ${keyName} to .env schema...`);
     envContent = appendSchemaEntry(envContent, keyName, keyDef.schemaType);
+    envContentChanged = true;
   }
 
   const aws = createAwsAdapter();
+  const projectSecret = await aws.getSecret(secretName(ctx.project));
   const globalValue = await getGlobalValue(aws, keyName);
 
   let key: string;
@@ -291,36 +308,56 @@ export async function newKeyCommand(
   if (await localFile.exists()) {
     localValues = parseEnvValues(await localFile.text());
   }
+  const previousLocalValues = { ...localValues };
   localValues[keyName] = key;
   const updatedParsed = parseEnvFile(envContent);
-  const localContent = generateLocalEnvContent(
-    updatedParsed.schema,
-    localValues
-  );
+  const localValuesChanged = !envValuesEqual(localValues, previousLocalValues);
 
-  await Bun.write(envPath, envContent);
-  await Bun.write(localPath, localContent);
-
-  const values = parseEnvValues(localContent);
+  const values = localValues;
   const result = validateEnv(updatedParsed.schema, values);
   assertValid(result);
 
   const files = await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
 
   const now = new Date().toISOString();
-  envContent = updateHeaderSyncDate(envContent, now);
+  const schemaChanged =
+    !projectSecret ||
+    !envContentEqualIgnoringSyncDate(envContent, projectSecret.schema);
+  if (schemaChanged) {
+    const updatedEnvContent = updateHeaderSyncDate(envContent, now);
+    if (updatedEnvContent !== envContent) {
+      envContent = updatedEnvContent;
+      envContentChanged = true;
+    }
+  }
+
+  const remoteValues = parseEnvValues(projectSecret?.values ?? "");
+  const valuesChanged =
+    !projectSecret ||
+    !envValuesEqual(values, remoteValues) ||
+    !envValuesEqual(files, projectSecret.files ?? {});
+  const valuesSyncDate = valuesChanged ? now : projectSecret?.syncDate ?? now;
 
   const payload: SecretPayload = {
     schema: envContent,
-    values: Object.entries(values)
-      .map(([k, v]) => `${k}=${v}`)
-      .join("\n"),
-    syncDate: now,
+    values: serializeEnvValues(values),
+    syncDate: valuesSyncDate,
     files: Object.keys(files).length > 0 ? files : undefined,
   };
 
   await aws.putSecret(secretName(ctx.project), payload);
-  await Bun.write(envPath, envContent);
+  if (envContentChanged) {
+    await Bun.write(envPath, envContent);
+  }
+  if (localValuesChanged) {
+    await Bun.write(
+      localPath,
+      generateLocalEnvContent(updatedParsed.schema, localValues, {
+        project: ctx.project,
+        syncDate: valuesSyncDate,
+      })
+    );
+  }
 
   if (!globalValue || key !== globalValue) {
     await saveToGlobal(aws, keyName, key, keyDef.schemaType, ctx.project);

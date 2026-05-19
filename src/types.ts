@@ -37,6 +37,7 @@ export type EnvValues = Record<string, string>;
 export interface SecretPayload {
   schema: string;
   values: string;
+  // Values version; the schema version lives in the .env header.
   syncDate: string;
   files?: Record<string, string>;
   locations?: Record<string, string>;

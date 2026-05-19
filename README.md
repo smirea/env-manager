@@ -49,7 +49,7 @@ env-manager <command> [options]
 Define environment variable schemas as comments in your `.env` file:
 
 ```bash
-#env-manager: my-project | 2025-01-27T10:00:00-05:00
+# env-manager: my-project | 2025-01-27T10:00:00-05:00
 
 API_KEY= # {string:format(/^sk-/)}
 PORT=3000 # {int:min(3000),max(10000)}
@@ -171,7 +171,7 @@ are considered, so unrelated global values stay untouched.
 Edit `.env` to add your variables with schema comments:
 
 ```bash
-#env-manager: my-app | 2025-01-27T10:00:00-05:00
+# env-manager: my-app | 2025-01-27T10:00:00-05:00
 
 DATABASE_URL= # {string}
 PORT=3000 # {int:min(1000),max(65535)}
@@ -183,10 +183,16 @@ DEBUG= # {optional bool}
 Create `.env.local` with actual values (not committed to git):
 
 ```bash
+# env-manager: my-app | 2025-01-27T10:00:00-05:00
+
 DATABASE_URL=postgres://localhost:5432/mydb
 PORT=3000
 DEBUG=true
 ```
+
+The `.env` header date versions the schema/template. It only changes when the
+stored schema changes. The `.env.local` header date versions the actual values
+and only changes when those values change.
 
 ### 4. Generate typed env access
 

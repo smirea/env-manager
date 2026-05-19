@@ -4,7 +4,6 @@ import {
   generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
-  updateHeaderSyncDate,
 } from "../parser";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
@@ -31,13 +30,15 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
 
   await writeFilesFromPayload(parsed.schema, values, secret.files, ctx.cwd);
 
-  const updatedSchema = updateHeaderSyncDate(secret.schema, secret.syncDate);
+  await Bun.write(envPath, secret.schema);
 
-  await Bun.write(envPath, updatedSchema);
-
-  if (secret.values) {
-    await Bun.write(localPath, generateLocalEnvContent(parsed.schema, values));
-  }
+  await Bun.write(
+    localPath,
+    generateLocalEnvContent(parsed.schema, values, {
+      project: parsed.header?.project ?? ctx.project,
+      syncDate: secret.syncDate,
+    })
+  );
 
   console.log(`Downloaded ${ctx.project} from AWS Secrets Manager`);
 }

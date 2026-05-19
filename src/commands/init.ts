@@ -11,7 +11,7 @@ import type { CommandContext, EnvVarSchema } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
 
-const TEMPLATE = `#env-manager: {{PROJECT}} | {{DATE}}
+const TEMPLATE = `# env-manager: {{PROJECT}} | {{DATE}}
 
 # Add your environment variables below
 # Example: API_KEY= # {string:format(/^sk-/)}
@@ -52,6 +52,7 @@ type CopyGlobalDefaultsParams = {
   assumeYes: boolean;
   restrictToNames: Set<string> | null;
   localSchema: EnvVarSchema[];
+  project: string;
 };
 
 function collectEnvVarNames(content: string): string[] {
@@ -73,6 +74,7 @@ async function copyGlobalDefaults({
   assumeYes,
   restrictToNames,
   localSchema,
+  project,
 }: CopyGlobalDefaultsParams): Promise<void> {
   const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
   if (!globalSecret?.values) {
@@ -129,7 +131,7 @@ async function copyGlobalDefaults({
       `Use ${name} from ${GLOBAL_LABEL}?`,
       assumeYes
     );
-    if (useIt) {
+    if (useIt && localValues[name] !== value) {
       localValues[name] = value;
       copiedAny = true;
       console.log(`  Added ${name}`);
@@ -137,7 +139,10 @@ async function copyGlobalDefaults({
   }
 
   if (copiedAny) {
-    const localContent = generateLocalEnvContent(localSchema, localValues);
+    const localContent = generateLocalEnvContent(localSchema, localValues, {
+      project,
+      syncDate: new Date().toISOString(),
+    });
     await Bun.write(localPath, localContent);
     console.log(`\nCopied selected keys to .env.local`);
   }
@@ -170,12 +175,13 @@ export async function initCommand(
         ctx.cwd
       );
       await Bun.write(envPath, secret.schema);
-      if (secret.values) {
-        await Bun.write(
-          localPath,
-          generateLocalEnvContent(parsed.schema, values)
-        );
-      }
+      await Bun.write(
+        localPath,
+        generateLocalEnvContent(parsed.schema, values, {
+          project: parsed.header?.project ?? ctx.project,
+          syncDate: secret.syncDate,
+        })
+      );
       console.log(`Downloaded .env from AWS for project "${ctx.project}"`);
       return;
     }
@@ -204,5 +210,6 @@ export async function initCommand(
     assumeYes,
     restrictToNames,
     localSchema,
+    project: ctx.project,
   });
 }

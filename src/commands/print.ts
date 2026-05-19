@@ -96,7 +96,10 @@ export function formatProjectPrintOutput(
 ): string {
   const parsed = parseEnvFile(payload.schema);
   const values = parseEnvValues(payload.values ?? '');
-  const localEnvContent = generateLocalEnvContent(parsed.schema, values).trimEnd();
+  const localEnvContent = generateLocalEnvContent(parsed.schema, values, {
+    project: parsed.header?.project ?? project,
+    syncDate: payload.syncDate,
+  }).trimEnd();
   const fileContent = formatStoredFiles(collectStoredFiles(payload));
 
   return [

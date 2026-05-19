@@ -9,9 +9,14 @@ import type {
 import { ParseError } from "./types";
 
 const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+const SYNC_DATE_PLACEHOLDER = "__env_manager_sync_date__";
+
+function formatHeaderLine(header: EnvFileHeader): string {
+  return `# env-manager: ${header.project} | ${header.syncDate}`;
+}
 
 export function parseHeader(line: string): EnvFileHeader | null {
-  const match = line.match(/^#env-manager:\s*([^\s|]+)\s*\|\s*(.+)$/);
+  const match = line.match(/^#\s*env-manager:\s*([^\s|]+)\s*\|\s*(.+)$/);
   if (!match) return null;
   return {
     project: match[1].trim(),
@@ -315,7 +320,7 @@ export function generateEnvContent(
   values: EnvValues
 ): string {
   const lines: string[] = [];
-  lines.push(`#env-manager: ${header.project} | ${header.syncDate}`);
+  lines.push(formatHeaderLine(header));
   lines.push("");
 
   for (const s of schema) {
@@ -340,9 +345,10 @@ function formatLocalValue(value: string): string {
 
 export function generateLocalEnvContent(
   schema: EnvVarSchema[],
-  values: EnvValues
+  values: EnvValues,
+  header?: EnvFileHeader
 ): string {
-  const lines: string[] = [];
+  const lines: string[] = header ? [formatHeaderLine(header), ""] : [];
   const schemaByName = new Map(schema.map((entry) => [entry.name, entry]));
   const emitted = new Set<string>();
 
@@ -398,7 +404,10 @@ export function updateHeaderSyncDate(content: string, newDate: string): string {
     const line = lines[i];
     const header = parseHeader(line);
     if (header) {
-      lines[i] = `#env-manager: ${header.project} | ${newDate}`;
+      lines[i] = formatHeaderLine({
+        project: header.project,
+        syncDate: newDate,
+      });
       break;
     }
     const trimmed = line.trim();
@@ -410,6 +419,59 @@ export function updateHeaderSyncDate(content: string, newDate: string): string {
     break;
   }
   return lines.join("\n");
+}
+
+export function upsertHeaderSyncDate(
+  content: string,
+  project: string,
+  newDate: string
+): string {
+  if (parseEnvFile(content).header) {
+    return updateHeaderSyncDate(content, newDate);
+  }
+
+  const header = formatHeaderLine({ project, syncDate: newDate });
+  if (content.trim() === "") {
+    return `${header}\n\n`;
+  }
+  return `${header}\n\n${content}`;
+}
+
+export function envContentEqualIgnoringSyncDate(
+  left: string,
+  right: string
+): boolean {
+  return (
+    upsertComparableHeaderDate(left) === upsertComparableHeaderDate(right)
+  );
+}
+
+function upsertComparableHeaderDate(content: string): string {
+  if (!parseEnvFile(content).header) {
+    return content;
+  }
+  return updateHeaderSyncDate(content, SYNC_DATE_PLACEHOLDER);
+}
+
+export function serializeEnvValues(values: EnvValues): string {
+  return Object.entries(values)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+export function envValuesEqual(
+  left: EnvValues,
+  right: EnvValues
+): boolean {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let i = 0; i < leftKeys.length; i++) {
+    const key = leftKeys[i];
+    if (key !== rightKeys[i]) return false;
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
 }
 
 export function appendSchemaEntry(
