@@ -50,7 +50,7 @@ describe('print command formatting', () => {
     const output = formatProjectPrintOutput('demo', createPayload());
 
     expect(output).toContain('project: demo');
-    expect(output).toContain('env: local');
+    expect(output).toContain('---- env: local ----');
     expect(output).toContain(
       '.env\n# env-manager: demo | 2026-03-07T00:00:00Z'
     );
@@ -102,9 +102,9 @@ describe('print command formatting', () => {
       },
     });
 
-    expect(output).toContain('env: local');
+    expect(output).toContain('---- env: local ----');
     expect(output).toContain("API_KEY='local' # {string}");
-    expect(output).toContain('env: prod');
+    expect(output).toContain('---- env: prod ----');
     expect(output).toContain("API_KEY='prod' # {string}");
   });
 
@@ -127,9 +127,9 @@ describe('print command formatting', () => {
       { environment: 'prod' }
     );
 
-    expect(output).toContain('env: prod');
+    expect(output).toContain('---- env: prod ----');
     expect(output).toContain("API_KEY='prod' # {string}");
-    expect(output).not.toContain('env: local');
+    expect(output).not.toContain('---- env: local ----');
     expect(output).not.toContain("API_KEY='local' # {string}");
   });
 });

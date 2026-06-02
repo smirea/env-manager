@@ -119,7 +119,7 @@ function formatEnvironmentPrintOutput(
 
   return [
     `project: ${project}`,
-    `env: ${environment}`,
+    `---- env: ${environment} ----`,
     formatSection('.env', schemaContent.trimEnd()),
     formatSection('.env.local', localEnvContent),
     formatSection('files', fileContent),
