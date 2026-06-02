@@ -1,11 +1,17 @@
 import { createAwsAdapter, secretName } from '../aws';
 import {
+  upsertEnvironmentInContent,
+  validateEnvironmentName,
+} from '../environment';
+import {
   generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
 } from '../parser';
+import { normalizeProjectSecret } from '../project-secret';
 import type {
   CommandContext,
+  EnvironmentPayload,
   EnvValues,
   EnvVarSchema,
   SecretPayload,
@@ -25,19 +31,21 @@ function getStoredFilePath(
   return values[schemaEntry.name] ?? schemaEntry.defaultValue;
 }
 
-export function collectStoredFiles(payload: SecretPayload): StoredFileEntry[] {
-  const parsed = parseEnvFile(payload.schema);
-  const values = parseEnvValues(payload.values ?? '');
-  const storedFiles = payload.files ?? {};
+export function collectStoredFiles(
+  schema: EnvVarSchema[],
+  values: EnvValues,
+  storedFiles: Record<string, string> | undefined
+): StoredFileEntry[] {
   const entries: StoredFileEntry[] = [];
   const seen = new Set<string>();
 
-  for (const schemaEntry of parsed.schema) {
+  for (const schemaEntry of schema) {
     if (schemaEntry.type !== 'file') continue;
 
     const path = getStoredFilePath(schemaEntry, values);
+    const files = storedFiles ?? {};
     const hasContent = Object.prototype.hasOwnProperty.call(
-      storedFiles,
+      files,
       schemaEntry.name
     );
 
@@ -48,12 +56,12 @@ export function collectStoredFiles(payload: SecretPayload): StoredFileEntry[] {
     entries.push({
       name: schemaEntry.name,
       path: path ?? '(path missing)',
-      content: hasContent ? storedFiles[schemaEntry.name] : null,
+      content: hasContent ? files[schemaEntry.name] : null,
     });
     seen.add(schemaEntry.name);
   }
 
-  for (const [name, content] of Object.entries(storedFiles)) {
+  for (const [name, content] of Object.entries(storedFiles ?? {})) {
     if (seen.has(name)) continue;
     entries.push({
       name,
@@ -90,27 +98,75 @@ function formatStoredFiles(files: StoredFileEntry[]): string {
     .join('\n\n');
 }
 
-export function formatProjectPrintOutput(
+function formatEnvironmentPrintOutput(
   project: string,
-  payload: SecretPayload
+  environment: string,
+  schemaContent: string,
+  envPayload: EnvironmentPayload
 ): string {
-  const parsed = parseEnvFile(payload.schema);
-  const values = parseEnvValues(payload.values ?? '');
+  const parsed = parseEnvFile(schemaContent);
+  const values = parseEnvValues(envPayload.values);
   const localEnvContent = generateLocalEnvContent(parsed.schema, values, {
     project: parsed.header?.project ?? project,
-    syncDate: payload.syncDate,
+    syncDate: envPayload.syncDate,
   }).trimEnd();
-  const fileContent = formatStoredFiles(collectStoredFiles(payload));
+  const fileContent = formatStoredFiles(
+    collectStoredFiles(parsed.schema, values, envPayload.files)
+  );
 
   return [
     `project: ${project}`,
-    formatSection('.env', payload.schema.trimEnd()),
+    `env: ${environment}`,
+    formatSection(
+      '.env',
+      upsertEnvironmentInContent(schemaContent, environment).trimEnd()
+    ),
     formatSection('.env.local', localEnvContent),
     formatSection('files', fileContent),
   ].join('\n\n');
 }
 
-export async function printCommand(ctx: CommandContext): Promise<void> {
+export function formatProjectPrintOutput(
+  project: string,
+  payload: SecretPayload,
+  options: { environment?: string } = {}
+): string {
+  const projectSecret = normalizeProjectSecret(payload);
+  const environments = options.environment
+    ? [options.environment]
+    : Object.keys(projectSecret.environments).sort();
+
+  if (environments.length === 0) {
+    return [
+      `project: ${project}`,
+      formatSection('.env', projectSecret.schema.trimEnd()),
+      formatSection('environments', ''),
+    ].join('\n\n');
+  }
+
+  return environments
+    .map((environment) => {
+      validateEnvironmentName(environment);
+      const envPayload = projectSecret.environments[environment];
+      if (!envPayload) {
+        throw new EnvManagerError(
+          `Environment "${environment}" not found for project "${project}"`
+        );
+      }
+      return formatEnvironmentPrintOutput(
+        project,
+        environment,
+        projectSecret.schema,
+        envPayload
+      );
+    })
+    .join('\n\n');
+}
+
+export async function printCommand(
+  ctx: CommandContext,
+  options: { environment?: string } = {}
+): Promise<void> {
   const aws = createAwsAdapter();
   const secret = await aws.getSecret(secretName(ctx.project));
 
@@ -120,5 +176,7 @@ export async function printCommand(ctx: CommandContext): Promise<void> {
     );
   }
 
-  process.stdout.write(`${formatProjectPrintOutput(ctx.project, secret)}\n`);
+  process.stdout.write(
+    `${formatProjectPrintOutput(ctx.project, secret, options)}\n`
+  );
 }

@@ -1,4 +1,8 @@
 import { createAwsAdapter, secretName } from "../aws";
+import {
+  removeEnvironmentFromContent,
+  resolveEnvironment,
+} from "../environment";
 import { collectFilePayload } from "../file-sync";
 import {
   envContentEqualIgnoringSyncDate,
@@ -9,6 +13,10 @@ import {
   updateHeaderSyncDate,
   upsertHeaderSyncDate,
 } from "../parser";
+import {
+  createProjectSecretPayload,
+  normalizeProjectSecret,
+} from "../project-secret";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
@@ -34,7 +42,12 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   const aws = createAwsAdapter();
   const now = new Date().toISOString();
+  const environment = await resolveEnvironment(ctx.cwd);
   const existingSecret = await aws.getSecret(secretName(ctx.project));
+  const existingProject = existingSecret
+    ? normalizeProjectSecret(existingSecret)
+    : null;
+  const existingEnvironment = existingProject?.environments[environment];
 
   if (!parsed.header) {
     if (existingSecret) {
@@ -62,25 +75,31 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   const files = await collectFilePayload(parsed.schema, values, ctx.cwd);
 
+  const envContentForStorage = removeEnvironmentFromContent(envContent);
+  let schemaForPayload = existingProject?.schema ?? envContentForStorage;
   const schemaChanged =
-    !existingSecret ||
-    !envContentEqualIgnoringSyncDate(envContent, existingSecret.schema);
+    !existingProject ||
+    !envContentEqualIgnoringSyncDate(
+      envContentForStorage,
+      existingProject.schema
+    );
   if (schemaChanged) {
     const updatedEnvContent = updateHeaderSyncDate(envContent, now);
     if (updatedEnvContent !== envContent) {
       envContent = updatedEnvContent;
       envContentChanged = true;
     }
+    schemaForPayload = removeEnvironmentFromContent(envContent);
   }
 
-  const remoteValues = parseEnvValues(existingSecret?.values ?? "");
+  const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");
   const valuesChanged =
-    !existingSecret ||
+    !existingEnvironment ||
     !envValuesEqual(values, remoteValues) ||
-    !envValuesEqual(files, existingSecret.files ?? {});
+    !envValuesEqual(files, existingEnvironment.files ?? {});
   const valuesSyncDate = valuesChanged
     ? now
-    : existingSecret?.syncDate ?? now;
+    : existingEnvironment?.syncDate ?? now;
 
   if (valuesChanged && localContent !== null) {
     const updatedLocalContent = upsertHeaderSyncDate(
@@ -93,17 +112,25 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     }
   }
 
-  const payload: SecretPayload = {
-    schema: envContent,
-    values: serializeEnvValues(values),
-    syncDate: valuesSyncDate,
-    files: Object.keys(files).length > 0 ? files : undefined,
+  const environments = {
+    ...existingProject?.environments,
+    [environment]: {
+      values: serializeEnvValues(values),
+      syncDate: valuesSyncDate,
+      files: Object.keys(files).length > 0 ? files : undefined,
+    },
   };
+  const payload: SecretPayload = createProjectSecretPayload(
+    schemaForPayload,
+    environments
+  );
 
   await aws.putSecret(secretName(ctx.project), payload);
   if (envContentChanged) {
     await Bun.write(envPath, envContent);
   }
 
-  console.log(`Uploaded ${ctx.project} to AWS Secrets Manager`);
+  console.log(
+    `Uploaded ${ctx.project}/${environment} to AWS Secrets Manager`
+  );
 }

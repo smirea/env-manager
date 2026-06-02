@@ -34,11 +34,17 @@ export interface ParsedEnvFile {
 
 export type EnvValues = Record<string, string>;
 
+export interface EnvironmentPayload {
+  values: string;
+  syncDate: string;
+  files?: Record<string, string>;
+}
+
 export interface SecretPayload {
   schema: string;
-  values: string;
-  // Values version; the schema version lives in the .env header.
-  syncDate: string;
+  environments?: Record<string, EnvironmentPayload>;
+  values?: string;
+  syncDate?: string;
   files?: Record<string, string>;
   locations?: Record<string, string>;
 }

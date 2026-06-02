@@ -1,10 +1,15 @@
 import { createAwsAdapter, secretName } from "../aws";
+import {
+  resolveEnvironment,
+  upsertEnvironmentInContent,
+} from "../environment";
 import { writeFilesFromPayload } from "../file-sync";
 import {
   generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
 } from "../parser";
+import { normalizeProjectSecret } from "../project-secret";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
@@ -14,6 +19,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
   const localPath = `${ctx.cwd}/.env.local`;
 
   const aws = createAwsAdapter();
+  const environment = await resolveEnvironment(ctx.cwd);
   const secret = await aws.getSecret(secretName(ctx.project));
 
   if (!secret) {
@@ -22,23 +28,36 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
     );
   }
 
-  const parsed = parseEnvFile(secret.schema);
-  const values = parseEnvValues(secret.values);
+  const projectSecret = normalizeProjectSecret(secret);
+  const envPayload = projectSecret.environments[environment];
+  if (!envPayload) {
+    throw new EnvManagerError(
+      `Environment "${environment}" not found for project "${ctx.project}"`
+    );
+  }
+
+  const parsed = parseEnvFile(projectSecret.schema);
+  const values = parseEnvValues(envPayload.values);
 
   const result = validateEnv(parsed.schema, values);
   assertValid(result);
 
-  await writeFilesFromPayload(parsed.schema, values, secret.files, ctx.cwd);
+  await writeFilesFromPayload(parsed.schema, values, envPayload.files, ctx.cwd);
 
-  await Bun.write(envPath, secret.schema);
+  await Bun.write(
+    envPath,
+    upsertEnvironmentInContent(projectSecret.schema, environment)
+  );
 
   await Bun.write(
     localPath,
     generateLocalEnvContent(parsed.schema, values, {
       project: parsed.header?.project ?? ctx.project,
-      syncDate: secret.syncDate,
+      syncDate: envPayload.syncDate,
     })
   );
 
-  console.log(`Downloaded ${ctx.project} from AWS Secrets Manager`);
+  console.log(
+    `Downloaded ${ctx.project}/${environment} from AWS Secrets Manager`
+  );
 }

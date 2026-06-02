@@ -4,6 +4,7 @@ import {
   formatProjectPrintOutput,
 } from './print';
 import type { SecretPayload } from '../types';
+import { parseEnvFile, parseEnvValues } from '../parser';
 
 function createPayload(overrides: Partial<SecretPayload> = {}): SecretPayload {
   return {
@@ -26,7 +27,10 @@ EXTRA_CERT=config/extra.pem`,
 
 describe('print command formatting', () => {
   test('collects file paths from schema defaults and local values', () => {
-    const files = collectStoredFiles(createPayload());
+    const payload = createPayload();
+    const parsed = parseEnvFile(payload.schema);
+    const values = parseEnvValues(payload.values ?? '');
+    const files = collectStoredFiles(parsed.schema, values, payload.files);
 
     expect(files).toEqual([
       {
@@ -46,7 +50,10 @@ describe('print command formatting', () => {
     const output = formatProjectPrintOutput('demo', createPayload());
 
     expect(output).toContain('project: demo');
-    expect(output).toContain('.env\n# env-manager: demo | 2026-03-07T00:00:00Z');
+    expect(output).toContain('env: local');
+    expect(output).toContain(
+      '.env\n# env-manager: demo | 2026-03-07T00:00:00Z\n# env-manager env: local'
+    );
     expect(output).toContain('.env.local\n# env-manager: demo | 2026-03-07T00:00:00Z');
     expect(output).toContain("API_KEY='secret' # {string}");
     expect(output).toContain("EXTRA_CERT='config/extra.pem' # {file}");
@@ -73,5 +80,51 @@ describe('print command formatting', () => {
     expect(output).toContain(
       'name: ORPHAN_FILE\npath: (unknown path)\ncontents:\norphan content'
     );
+  });
+
+  test('prints each environment from the project payload', () => {
+    const output = formatProjectPrintOutput('demo', {
+      schema: createPayload().schema,
+      environments: {
+        local: {
+          values: 'API_KEY=local',
+          syncDate: '2026-03-07T00:00:00Z',
+        },
+        prod: {
+          values: 'API_KEY=prod',
+          syncDate: '2026-03-08T00:00:00Z',
+        },
+      },
+    });
+
+    expect(output).toContain('env: local');
+    expect(output).toContain("API_KEY='local' # {string}");
+    expect(output).toContain('env: prod');
+    expect(output).toContain("API_KEY='prod' # {string}");
+  });
+
+  test('can print only one selected environment', () => {
+    const output = formatProjectPrintOutput(
+      'demo',
+      {
+        schema: createPayload().schema,
+        environments: {
+          local: {
+            values: 'API_KEY=local',
+            syncDate: '2026-03-07T00:00:00Z',
+          },
+          prod: {
+            values: 'API_KEY=prod',
+            syncDate: '2026-03-08T00:00:00Z',
+          },
+        },
+      },
+      { environment: 'prod' }
+    );
+
+    expect(output).toContain('env: prod');
+    expect(output).toContain("API_KEY='prod' # {string}");
+    expect(output).not.toContain('env: local');
+    expect(output).not.toContain("API_KEY='local' # {string}");
   });
 });

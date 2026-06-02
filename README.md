@@ -20,11 +20,15 @@ env-manager <command> [options]
 | Command | Description |
 |---------|-------------|
 | `init` | Create `.env` from AWS or new template and copy matching global defaults |
-| `up` | Upload `.env` schema and `.env.local` values to AWS |
-| `down` | Download `.env` and `.env.local` from AWS |
+| `up` | Upload `.env` schema and `.env.local` values for the current environment to AWS |
+| `down` | Download `.env` and `.env.local` for the current environment from AWS |
 | `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
-| `print [project]` | Print the stored `.env`, `.env.local`, and file contents for a project |
+| `print [project]` | Print all stored environments for a project |
+| `print [project] -e <env>` | Print one stored environment for a project |
+| `env set <env>` | Set the default environment stored in `.env` |
+| `env list` (`env ls`) | List environments for a project |
+| `env rm <env>` | Remove an environment from AWS |
 | `global set` | Set a global default env var |
 | `global get [NAME]` | Get a global default env var |
 | `global list` (`global ls`) | List all global default env vars |
@@ -38,6 +42,7 @@ env-manager <command> [options]
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: current directory name) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
+| `-e, --env <name>` | Print only one environment (`print` only) |
 | `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
 | `--credit <usd>` | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`) |
 | `--unlimited` | Create OpenRouter key without a credit limit (`new-key OPENROUTER_API_KEY` only) |
@@ -50,6 +55,7 @@ Define environment variable schemas as comments in your `.env` file:
 
 ```bash
 # env-manager: my-project | 2025-01-27T10:00:00-05:00
+# env-manager env: local
 
 API_KEY= # {string:format(/^sk-/)}
 PORT=3000 # {int:min(3000),max(10000)}
@@ -77,6 +83,27 @@ RATE_LIMIT=0.5
 All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
 `file` values are file paths. On sync, file contents are stored in the secret and written back to the same path when downloading. Files must be valid UTF-8 text (binary files are rejected).
+
+## Environments
+
+Project values are grouped by environment. If `.env` has no environment comment,
+the current environment is `local`.
+
+```bash
+env-manager env set staging
+env-manager env ls
+env-manager env rm staging
+```
+
+`env set` only updates `.env`:
+
+```bash
+# env-manager env: staging
+```
+
+The next `env-manager up` creates or updates that environment in AWS.
+`env-manager down` downloads the current environment and fails if that
+environment has been removed remotely.
 
 ## Global Defaults
 
@@ -227,6 +254,7 @@ env-manager down
 # Print the stored secret payload for a project
 env-manager print
 env-manager print my-project
+env-manager print my-project -e staging
 ```
 
 ## AWS Configuration
@@ -244,13 +272,15 @@ AWS_REGION=us-east-1
 ```
 
 Secrets are stored in AWS Secrets Manager under `env-manager/<project-name>`.
+Project secrets contain one shared schema and one values/files payload per
+environment. Existing single-environment secrets are treated as `local`.
 
 ## File Structure
 
 | File | Purpose |
 |------|---------|
 | `.env` | Schema + defaults (committed to git) |
-| `.env.local` | Actual values (not committed) |
+| `.env.local` | Actual values for the current environment (not committed) |
 | `src/env.ts` | Generated typed env access |
 
 ## License

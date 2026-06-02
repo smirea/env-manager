@@ -1,4 +1,8 @@
 import { createAwsAdapter, secretName } from "../aws";
+import {
+  removeEnvironmentFromContent,
+  resolveEnvironmentFromContent,
+} from "../environment";
 import { collectFilePayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { getKey, listKeys, listKeyNames } from "../keys";
@@ -16,6 +20,10 @@ import {
   updateHeaderSyncDate,
   upsertHeaderSyncDate,
 } from "../parser";
+import {
+  createProjectSecretPayload,
+  normalizeProjectSecret,
+} from "../project-secret";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
@@ -172,7 +180,7 @@ async function saveToGlobal(
       schema = updateHeaderSyncDate(schema, now);
     }
 
-    const values = parseEnvValues(secret.values);
+    const values = parseEnvValues(secret.values ?? '');
     const previousValues = { ...values };
     values[keyName] = keyValue;
     const valuesChanged = !envValuesEqual(values, previousValues);
@@ -253,6 +261,7 @@ export async function newKeyCommand(
       `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
     );
   }
+  const environment = resolveEnvironmentFromContent(envContent);
 
   const existsInSchema = parsed.schema.some((s) => s.name === keyName);
   if (!existsInSchema) {
@@ -263,6 +272,10 @@ export async function newKeyCommand(
 
   const aws = createAwsAdapter();
   const projectSecret = await aws.getSecret(secretName(ctx.project));
+  const existingProject = projectSecret
+    ? normalizeProjectSecret(projectSecret)
+    : null;
+  const existingEnvironment = existingProject?.environments[environment];
   const globalValue = await getGlobalValue(aws, keyName);
 
   let key: string;
@@ -320,30 +333,44 @@ export async function newKeyCommand(
   const files = await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
 
   const now = new Date().toISOString();
+  const envContentForStorage = removeEnvironmentFromContent(envContent);
+  let schemaForPayload = existingProject?.schema ?? envContentForStorage;
   const schemaChanged =
-    !projectSecret ||
-    !envContentEqualIgnoringSyncDate(envContent, projectSecret.schema);
+    !existingProject ||
+    !envContentEqualIgnoringSyncDate(
+      envContentForStorage,
+      existingProject.schema
+    );
   if (schemaChanged) {
     const updatedEnvContent = updateHeaderSyncDate(envContent, now);
     if (updatedEnvContent !== envContent) {
       envContent = updatedEnvContent;
       envContentChanged = true;
     }
+    schemaForPayload = removeEnvironmentFromContent(envContent);
   }
 
-  const remoteValues = parseEnvValues(projectSecret?.values ?? "");
+  const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");
   const valuesChanged =
-    !projectSecret ||
+    !existingEnvironment ||
     !envValuesEqual(values, remoteValues) ||
-    !envValuesEqual(files, projectSecret.files ?? {});
-  const valuesSyncDate = valuesChanged ? now : projectSecret?.syncDate ?? now;
+    !envValuesEqual(files, existingEnvironment.files ?? {});
+  const valuesSyncDate = valuesChanged
+    ? now
+    : existingEnvironment?.syncDate ?? now;
 
-  const payload: SecretPayload = {
-    schema: envContent,
-    values: serializeEnvValues(values),
-    syncDate: valuesSyncDate,
-    files: Object.keys(files).length > 0 ? files : undefined,
+  const environments = {
+    ...existingProject?.environments,
+    [environment]: {
+      values: serializeEnvValues(values),
+      syncDate: valuesSyncDate,
+      files: Object.keys(files).length > 0 ? files : undefined,
+    },
   };
+  const payload: SecretPayload = createProjectSecretPayload(
+    schemaForPayload,
+    environments
+  );
 
   await aws.putSecret(secretName(ctx.project), payload);
   if (envContentChanged) {
@@ -364,5 +391,5 @@ export async function newKeyCommand(
     console.log(`Saved ${keyName} to ${GLOBAL_LABEL}`);
   }
 
-  console.log(`Added ${keyName} and synced to AWS`);
+  console.log(`Added ${keyName} and synced ${ctx.project}/${environment} to AWS`);
 }

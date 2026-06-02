@@ -6,6 +6,11 @@ import { hideBin } from 'yargs/helpers';
 import { checkAwsCredentials } from './aws';
 import { downCommand } from './commands/down';
 import {
+  envListCommand,
+  envRmCommand,
+  envSetCommand,
+} from './commands/env';
+import {
   globalGetCommand,
   globalListCommand,
   globalRmCommand,
@@ -58,7 +63,7 @@ function validateProjectName(project: string, command: string): void {
       `Invalid project name "${project}". Project names cannot include spaces or "|".`
     );
   }
-  const commandsRestrictingDefault = ['up', 'down', 'init'];
+  const commandsRestrictingDefault = ['up', 'down', 'init', 'env'];
   if (
     commandsRestrictingDefault.includes(command) &&
     RESERVED_PROJECT_NAMES.includes(project)
@@ -79,7 +84,7 @@ function createContext(argv: ProjectArgs): CommandContext {
 const upCmd: CommandModule<any, any> = {
   command: "up",
   describe:
-    "Validate schema + values, then upload .env schema, .env.local values, and file payloads to AWS",
+    "Validate schema + current environment values, then upload to AWS",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
@@ -93,7 +98,7 @@ const upCmd: CommandModule<any, any> = {
 const downCmd: CommandModule<any, any> = {
   command: "down",
   describe:
-    "Download schema + values from AWS, validate them, and write .env/.env.local files",
+    "Download schema + current environment values from AWS and write .env/.env.local files",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
@@ -171,12 +176,12 @@ const listCmd: CommandModule<any, any> = {
 
 interface PrintArgs {
   project?: string;
+  env?: string;
 }
 
 const printCmd: CommandModule<any, any> = {
   command: 'print [project]',
-  describe:
-    'Print the stored .env, .env.local, and file payloads for a project',
+  describe: 'Print stored environments for a project',
   builder: (yargs: Argv<Record<string, never>>) =>
     yargs
       .positional('project', {
@@ -187,13 +192,88 @@ const printCmd: CommandModule<any, any> = {
         alias: 'p',
         type: 'string',
         description: 'Project name',
+      })
+      .option('env', {
+        alias: 'e',
+        type: 'string',
+        description: 'Only print one environment',
       }) as Argv<PrintArgs>,
   handler: async (argv) => {
-    const project = (argv as PrintArgs).project ?? basename(process.cwd());
+    const args = argv as PrintArgs;
+    const project = args.project ?? basename(process.cwd());
     validateProjectName(project, 'print');
     await checkAwsCredentials();
-    await printCommand(createContext({ project }));
+    await printCommand(createContext({ project }), { environment: args.env });
   },
+};
+
+interface EnvNameArgs extends ProjectArgs {
+  environment?: string;
+}
+
+const envSetCmd: CommandModule<any, any> = {
+  command: 'set <environment>',
+  describe: 'Set the default environment stored in .env',
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs.positional('environment', {
+      type: 'string',
+      description: 'Environment name',
+    }) as unknown as Argv<EnvNameArgs>,
+  handler: async (argv) => {
+    const args = argv as unknown as EnvNameArgs;
+    if (!args.environment) {
+      throw new EnvManagerError('Usage: env-manager env set <environment>');
+    }
+    validateProjectName(args.project, 'env');
+    await envSetCommand(createContext(args), args.environment);
+  },
+};
+
+const envListCmd: CommandModule<any, any> = {
+  command: 'list',
+  aliases: ['ls'],
+  describe: 'List environments stored for a project',
+  handler: async (argv) => {
+    const args = argv as unknown as ProjectArgs;
+    validateProjectName(args.project, 'env');
+    await checkAwsCredentials();
+    await envListCommand(createContext(args));
+  },
+};
+
+const envRmCmd: CommandModule<any, any> = {
+  command: 'rm <environment>',
+  describe: 'Remove an environment from AWS',
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs.positional('environment', {
+      type: 'string',
+      description: 'Environment name',
+    }) as unknown as Argv<EnvNameArgs>,
+  handler: async (argv) => {
+    const args = argv as unknown as EnvNameArgs;
+    if (!args.environment) {
+      throw new EnvManagerError('Usage: env-manager env rm <environment>');
+    }
+    validateProjectName(args.project, 'env');
+    await checkAwsCredentials();
+    await envRmCommand(createContext(args), args.environment);
+  },
+};
+
+const envCmd: CommandModule<any, any> = {
+  command: 'env',
+  describe: 'Manage project environments',
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(
+      yargs
+        .command(envSetCmd)
+        .command(envListCmd)
+        .command(envRmCmd)
+        .demandCommand(1, 'Please specify an env command')
+        .strict()
+        .help()
+    ) as Argv<ProjectArgs>,
+  handler: () => {},
 };
 
 interface GlobalGetArgs {
@@ -413,7 +493,7 @@ interface NewKeyArgs extends ProjectArgs {
 const newKeyCmd: CommandModule<any, any> = {
   command: "new-key [key]",
   describe:
-    "Create or reuse a known API key, add it to .env/.env.local, and sync to AWS",
+    "Create or reuse a known API key, add it to the current environment, and sync to AWS",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
       yargs
@@ -486,6 +566,7 @@ async function run() {
     initCmd,
     listCmd,
     printCmd,
+    envCmd,
     globalCmd,
     newKeyCmd,
   ];
