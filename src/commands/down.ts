@@ -13,6 +13,7 @@ import { normalizeProjectSecret } from "../project-secret";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
+import { updateConfiguredTsOutput } from "./ts";
 
 export async function downCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
@@ -56,6 +57,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
       environment
     )
   );
+  await updateConfiguredTsOutput(ctx, projectSecret.schema);
 
   console.log(
     `Downloaded ${ctx.project}/${environment} from AWS Secrets Manager`

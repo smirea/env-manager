@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { tsCommand } from './ts';
+import { tsCommand, updateConfiguredTsOutput } from './ts';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
@@ -139,6 +139,29 @@ describe('ts command', () => {
       const envAfter = await readFile(path.join(dir, '.env'), 'utf8');
       expect(envAfter).toContain(`# env-manager ts: ${newPath}`);
       expect(envAfter).not.toContain('old.ts');
+    });
+  });
+
+  test('updates a configured ts output from env content', async () => {
+    await withTempDir(async (dir) => {
+      await mkdir(path.join(dir, 'generated'), { recursive: true });
+
+      await updateConfiguredTsOutput(
+        { project: 'test-project', cwd: dir },
+        [
+          '# env-manager: test-project | 2025-01-01T00:00:00Z',
+          '# env-manager ts: generated/env.ts',
+          '',
+          'FOO=bar # {int}',
+          '',
+        ].join('\n')
+      );
+
+      const output = await readFile(
+        path.join(dir, 'generated/env.ts'),
+        'utf8'
+      );
+      expect(output).toContain('FOO: z.coerce.number().int(),');
     });
   });
 });

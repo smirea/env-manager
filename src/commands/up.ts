@@ -21,6 +21,7 @@ import {
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
+import { updateConfiguredTsOutput } from "./ts";
 
 export async function upCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
@@ -135,6 +136,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   if (envContentChanged) {
     await Bun.write(envPath, envContent);
   }
+  await updateConfiguredTsOutput(ctx, envContent);
 
   console.log(
     `Uploaded ${ctx.project}/${environment} to AWS Secrets Manager`

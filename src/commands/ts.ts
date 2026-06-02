@@ -1,3 +1,4 @@
+import { isAbsolute, join } from 'node:path';
 import { removeEnvironmentFromContent } from '../environment';
 import { parseEnvFile } from '../parser';
 import type { CommandContext, EnvVarSchema } from '../types';
@@ -67,6 +68,10 @@ function parseTsPathFromEnv(content: string): string | null {
   return null;
 }
 
+function resolveOutputPath(ctx: CommandContext, outputPath: string): string {
+  return isAbsolute(outputPath) ? outputPath : join(ctx.cwd, outputPath);
+}
+
 function upsertTsPathInEnv(content: string, tsPath: string): string {
   const comment = `${TS_PATH_COMMENT_PREFIX}${tsPath}`;
   const lines = content.split('\n');
@@ -110,6 +115,19 @@ export async function tsCommand(
   }
 
   const outPath = outputPath ?? storedPath ?? DEFAULT_OUTPUT_PATH;
+  await writeTsOutput(ctx, content, outPath);
+
+  const updatedEnv = upsertTsPathInEnv(content, outPath);
+  await Bun.write(envPath, updatedEnv);
+
+  console.log(`Generated ${outPath}`);
+}
+
+async function writeTsOutput(
+  ctx: CommandContext,
+  content: string,
+  outputPath: string
+): Promise<void> {
   const parsed = parseEnvFile(content);
 
   if (parsed.header && parsed.header.project !== ctx.project) {
@@ -127,10 +145,20 @@ export async function tsCommand(
   const fields = parsed.schema.map(generateZodField).join('\n');
   const output = HEADER + fields + '\n' + FOOTER;
 
-  await Bun.write(outPath, output);
+  await Bun.write(resolveOutputPath(ctx, outputPath), output);
+}
 
-  const updatedEnv = upsertTsPathInEnv(content, outPath);
-  await Bun.write(envPath, updatedEnv);
+export async function updateConfiguredTsOutput(
+  ctx: CommandContext,
+  envContent: string
+): Promise<void> {
+  const content = removeEnvironmentFromContent(envContent);
+  const outputPath = parseTsPathFromEnv(content);
 
-  console.log(`Generated ${outPath}`);
+  if (!outputPath) {
+    return;
+  }
+
+  await writeTsOutput(ctx, content, outputPath);
+  console.log(`Generated ${outputPath}`);
 }
