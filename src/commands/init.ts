@@ -1,5 +1,6 @@
 import { createAwsAdapter, secretName } from "../aws";
 import {
+  removeEnvironmentFromContent,
   resolveEnvironment,
   upsertEnvironmentInContent,
 } from "../environment";
@@ -55,6 +56,7 @@ type CopyGlobalDefaultsParams = {
   aws: ReturnType<typeof createAwsAdapter>;
   localPath: string;
   assumeYes: boolean;
+  environment: string;
   restrictToNames: Set<string> | null;
   localSchema: EnvVarSchema[];
   project: string;
@@ -77,6 +79,7 @@ async function copyGlobalDefaults({
   aws,
   localPath,
   assumeYes,
+  environment,
   restrictToNames,
   localSchema,
   project,
@@ -144,10 +147,13 @@ async function copyGlobalDefaults({
   }
 
   if (copiedAny) {
-    const localContent = generateLocalEnvContent(localSchema, localValues, {
-      project,
-      syncDate: new Date().toISOString(),
-    });
+    const localContent = upsertEnvironmentInContent(
+      generateLocalEnvContent(localSchema, localValues, {
+        project,
+        syncDate: new Date().toISOString(),
+      }),
+      environment
+    );
     await Bun.write(localPath, localContent);
     console.log(`\nCopied selected keys to .env.local`);
   }
@@ -188,16 +194,16 @@ export async function initCommand(
         envPayload.files,
         ctx.cwd
       );
-      await Bun.write(
-        envPath,
-        upsertEnvironmentInContent(projectSecret.schema, environment)
-      );
+      await Bun.write(envPath, projectSecret.schema);
       await Bun.write(
         localPath,
-        generateLocalEnvContent(parsed.schema, values, {
-          project: parsed.header?.project ?? ctx.project,
-          syncDate: envPayload.syncDate,
-        })
+        upsertEnvironmentInContent(
+          generateLocalEnvContent(parsed.schema, values, {
+            project: parsed.header?.project ?? ctx.project,
+            syncDate: envPayload.syncDate,
+          }),
+          environment
+        )
       );
       console.log(
         `Downloaded .env from AWS for project "${ctx.project}" environment "${environment}"`
@@ -205,9 +211,15 @@ export async function initCommand(
       return;
     }
   } else {
+    const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
+    if (envContentWithoutEnvironment !== envContent) {
+      envContent = envContentWithoutEnvironment;
+      await Bun.write(envPath, envContent);
+    }
     console.log(`.env already exists at ${envPath}, skipping creation.`);
   }
 
+  const environment = await resolveEnvironment(ctx.cwd);
   let restrictToNames: Set<string> | null = null;
   if (envAlreadyExists) {
     const names = collectEnvVarNames(envContent);
@@ -227,6 +239,7 @@ export async function initCommand(
     aws,
     localPath,
     assumeYes,
+    environment,
     restrictToNames,
     localSchema,
     project: ctx.project,

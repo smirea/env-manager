@@ -1,7 +1,8 @@
 import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
-  resolveEnvironmentFromContent,
+  resolveEnvironment,
+  upsertEnvironmentInContent,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
@@ -249,7 +250,7 @@ export async function newKeyCommand(
 
   let envContent = await envFile.text();
   let envContentChanged = false;
-  const parsed = parseEnvFile(envContent);
+  let parsed = parseEnvFile(envContent);
 
   if (!parsed.header) {
     throw new EnvManagerError(
@@ -261,7 +262,13 @@ export async function newKeyCommand(
       `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
     );
   }
-  const environment = resolveEnvironmentFromContent(envContent);
+  const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
+  if (envContentWithoutEnvironment !== envContent) {
+    envContent = envContentWithoutEnvironment;
+    envContentChanged = true;
+    parsed = parseEnvFile(envContent);
+  }
+  const environment = await resolveEnvironment(ctx.cwd);
 
   const existsInSchema = parsed.schema.some((s) => s.name === keyName);
   if (!existsInSchema) {
@@ -379,10 +386,13 @@ export async function newKeyCommand(
   if (localValuesChanged) {
     await Bun.write(
       localPath,
-      generateLocalEnvContent(updatedParsed.schema, localValues, {
-        project: ctx.project,
-        syncDate: valuesSyncDate,
-      })
+      upsertEnvironmentInContent(
+        generateLocalEnvContent(updatedParsed.schema, localValues, {
+          project: ctx.project,
+          syncDate: valuesSyncDate,
+        }),
+        environment
+      )
     );
   }
 

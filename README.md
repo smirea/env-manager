@@ -26,7 +26,7 @@ env-manager <command> [options]
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
 | `print [project]` | Print all stored environments for a project |
 | `print [project] -e <env>` | Print one stored environment for a project |
-| `env set <env>` | Set the default environment stored in `.env` |
+| `env set <env>` | Set the default environment stored in `.env.local` |
 | `env list` (`env ls`) | List environments for a project |
 | `env rm <env>` | Remove an environment from AWS |
 | `global set` | Set a global default env var |
@@ -55,7 +55,6 @@ Define environment variable schemas as comments in your `.env` file:
 
 ```bash
 # env-manager: my-project | 2025-01-27T10:00:00-05:00
-# env-manager env: local
 
 API_KEY= # {string:format(/^sk-/)}
 PORT=3000 # {int:min(3000),max(10000)}
@@ -86,8 +85,9 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
 ## Environments
 
-Project values are grouped by environment. If `.env` has no environment comment,
-the current environment is `local`.
+Project values are grouped by environment. The current environment is stored in
+`.env.local`, which should stay git ignored. If `.env.local` has no environment
+comment, the current environment is `local`.
 
 ```bash
 env-manager env set staging
@@ -95,7 +95,7 @@ env-manager env ls
 env-manager env rm staging
 ```
 
-`env set` only updates `.env`:
+`env set` only updates `.env.local`:
 
 ```bash
 # env-manager env: staging
@@ -211,6 +211,7 @@ Create `.env.local` with actual values (not committed to git):
 
 ```bash
 # env-manager: my-app | 2025-01-27T10:00:00-05:00
+# env-manager env: local
 
 DATABASE_URL=postgres://localhost:5432/mydb
 PORT=3000
@@ -218,8 +219,8 @@ DEBUG=true
 ```
 
 The `.env` header date versions the schema/template. It only changes when the
-stored schema changes. The `.env.local` header date versions the actual values
-and only changes when those values change.
+stored schema changes. The `.env.local` header date versions the actual values,
+and the `.env.local` environment comment selects which values commands use.
 
 ### 4. Generate typed env access
 

@@ -2,6 +2,7 @@ import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
   resolveEnvironment,
+  upsertEnvironmentInContent,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import {
@@ -38,6 +39,12 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     throw new EnvManagerError(
       `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
     );
+  }
+  const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
+  if (envContentWithoutEnvironment !== envContent) {
+    envContent = envContentWithoutEnvironment;
+    envContentChanged = true;
+    parsed = parseEnvFile(envContent);
   }
 
   const aws = createAwsAdapter();
@@ -102,10 +109,9 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     : existingEnvironment?.syncDate ?? now;
 
   if (valuesChanged && localContent !== null) {
-    const updatedLocalContent = upsertHeaderSyncDate(
-      localContent,
-      ctx.project,
-      valuesSyncDate
+    const updatedLocalContent = upsertEnvironmentInContent(
+      upsertHeaderSyncDate(localContent, ctx.project, valuesSyncDate),
+      environment
     );
     if (updatedLocalContent !== localContent) {
       await Bun.write(localPath, updatedLocalContent);

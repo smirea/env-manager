@@ -213,7 +213,7 @@ interface EnvNameArgs extends ProjectArgs {
 
 const envSetCmd: CommandModule<any, any> = {
   command: 'set <environment>',
-  describe: 'Set the default environment stored in .env',
+  describe: 'Set the default environment stored in .env.local',
   builder: (yargs: Argv<Record<string, never>>) =>
     yargs.positional('environment', {
       type: 'string',

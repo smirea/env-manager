@@ -21,19 +21,22 @@ export async function envSetCommand(
 
   const envPath = `${ctx.cwd}/.env`;
   const envFile = Bun.file(envPath);
-  if (!(await envFile.exists())) {
-    throw new EnvManagerError(`.env not found at ${envPath}`);
+  if (await envFile.exists()) {
+    const parsed = parseEnvFile(await envFile.text());
+    if (parsed.header && parsed.header.project !== ctx.project) {
+      throw new EnvManagerError(
+        `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
+      );
+    }
   }
 
-  const content = await envFile.text();
-  const parsed = parseEnvFile(content);
-  if (parsed.header && parsed.header.project !== ctx.project) {
-    throw new EnvManagerError(
-      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
-    );
-  }
-
-  await Bun.write(envPath, upsertEnvironmentInContent(content, environment));
+  const localPath = `${ctx.cwd}/.env.local`;
+  const localFile = Bun.file(localPath);
+  const localContent = (await localFile.exists()) ? await localFile.text() : '';
+  await Bun.write(
+    localPath,
+    upsertEnvironmentInContent(localContent, environment)
+  );
   console.log(`Set default environment to ${environment}`);
 }
 

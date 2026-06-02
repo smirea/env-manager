@@ -1,12 +1,25 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   DEFAULT_ENVIRONMENT,
   parseEnvironmentComment,
   removeEnvironmentFromContent,
+  resolveEnvironment,
   resolveEnvironmentFromContent,
   upsertEnvironmentInContent,
   validateEnvironmentName,
 } from './environment';
+
+async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-env-'));
+  try {
+    return await fn(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 describe('environment metadata', () => {
   test('defaults to local when no env comment exists', () => {
@@ -22,6 +35,23 @@ FOO=bar # {string}
     expect(parseEnvironmentComment('# env-manager env: staging')).toBe(
       'staging'
     );
+  });
+
+  test('resolves from .env.local and ignores .env', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(path.join(dir, '.env'), '# env-manager env: prod\n');
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: staging\n');
+
+      expect(await resolveEnvironment(dir)).toBe('staging');
+    });
+  });
+
+  test('defaults to local when .env.local is missing', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(path.join(dir, '.env'), '# env-manager env: prod\n');
+
+      expect(await resolveEnvironment(dir)).toBe(DEFAULT_ENVIRONMENT);
+    });
   });
 
   test('inserts env comment after the main header', () => {

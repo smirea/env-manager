@@ -52,9 +52,14 @@ describe('print command formatting', () => {
     expect(output).toContain('project: demo');
     expect(output).toContain('env: local');
     expect(output).toContain(
+      '.env\n# env-manager: demo | 2026-03-07T00:00:00Z'
+    );
+    expect(output).not.toContain(
       '.env\n# env-manager: demo | 2026-03-07T00:00:00Z\n# env-manager env: local'
     );
-    expect(output).toContain('.env.local\n# env-manager: demo | 2026-03-07T00:00:00Z');
+    expect(output).toContain(
+      '.env.local\n# env-manager: demo | 2026-03-07T00:00:00Z\n# env-manager env: local'
+    );
     expect(output).toContain("API_KEY='secret' # {string}");
     expect(output).toContain("EXTRA_CERT='config/extra.pem' # {file}");
     expect(output).toContain('files\nname: CERT\npath: secrets/cert.pem\ncontents:\nprimary cert');

@@ -44,17 +44,17 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
 
   await writeFilesFromPayload(parsed.schema, values, envPayload.files, ctx.cwd);
 
-  await Bun.write(
-    envPath,
-    upsertEnvironmentInContent(projectSecret.schema, environment)
-  );
+  await Bun.write(envPath, projectSecret.schema);
 
   await Bun.write(
     localPath,
-    generateLocalEnvContent(parsed.schema, values, {
-      project: parsed.header?.project ?? ctx.project,
-      syncDate: envPayload.syncDate,
-    })
+    upsertEnvironmentInContent(
+      generateLocalEnvContent(parsed.schema, values, {
+        project: parsed.header?.project ?? ctx.project,
+        syncDate: envPayload.syncDate,
+      }),
+      environment
+    )
   );
 
   console.log(

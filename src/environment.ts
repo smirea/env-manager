@@ -34,11 +34,11 @@ export function resolveEnvironmentFromContent(content: string): string {
 }
 
 export async function resolveEnvironment(cwd: string): Promise<string> {
-  const envFile = Bun.file(`${cwd}/.env`);
-  if (!(await envFile.exists())) {
+  const localFile = Bun.file(`${cwd}/.env.local`);
+  if (!(await localFile.exists())) {
     return DEFAULT_ENVIRONMENT;
   }
-  return resolveEnvironmentFromContent(await envFile.text());
+  return resolveEnvironmentFromContent(await localFile.text());
 }
 
 export function upsertEnvironmentInContent(

@@ -106,10 +106,13 @@ function formatEnvironmentPrintOutput(
 ): string {
   const parsed = parseEnvFile(schemaContent);
   const values = parseEnvValues(envPayload.values);
-  const localEnvContent = generateLocalEnvContent(parsed.schema, values, {
-    project: parsed.header?.project ?? project,
-    syncDate: envPayload.syncDate,
-  }).trimEnd();
+  const localEnvContent = upsertEnvironmentInContent(
+    generateLocalEnvContent(parsed.schema, values, {
+      project: parsed.header?.project ?? project,
+      syncDate: envPayload.syncDate,
+    }),
+    environment
+  ).trimEnd();
   const fileContent = formatStoredFiles(
     collectStoredFiles(parsed.schema, values, envPayload.files)
   );
@@ -117,10 +120,7 @@ function formatEnvironmentPrintOutput(
   return [
     `project: ${project}`,
     `env: ${environment}`,
-    formatSection(
-      '.env',
-      upsertEnvironmentInContent(schemaContent, environment).trimEnd()
-    ),
+    formatSection('.env', schemaContent.trimEnd()),
     formatSection('.env.local', localEnvContent),
     formatSection('files', fileContent),
   ].join('\n\n');

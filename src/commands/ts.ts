@@ -1,3 +1,4 @@
+import { removeEnvironmentFromContent } from '../environment';
 import { parseEnvFile } from '../parser';
 import type { CommandContext, EnvVarSchema } from '../types';
 import { EnvManagerError } from '../types';
@@ -99,7 +100,7 @@ export async function tsCommand(
     throw new EnvManagerError(`.env not found at ${envPath}`);
   }
 
-  const content = await envFile.text();
+  const content = removeEnvironmentFromContent(await envFile.text());
   const storedPath = parseTsPathFromEnv(content);
 
   if (outputPath && storedPath && outputPath !== storedPath && !options?.force) {
