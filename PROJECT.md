@@ -25,7 +25,7 @@ utility to manage my own environment variables for all my personal projects
 
 3. cli script
 
-    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and `.env.local` values. `.env` date only changes when the schema/template changes from AWS; `.env.local` date only changes when values change. defaults project to basename of cwd
+    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and `.env.local` values. `.env` date only changes when the schema/template changes from AWS; `.env.local` date only changes when values change. defaults project to the `.env` header, then basename of cwd
 
     3.2. `env-manager down [-p --project=<name>]` - syncs both `.env` and `.env.local` from aws, preserving the stored schema date and writing the stored value date to `.env.local`
 
@@ -38,7 +38,7 @@ utility to manage my own environment variables for all my personal projects
     3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to `.env.local`, syncs to AWS. auto-adds schema entry if missing.
 
     flags:
-    - `-p, --project <name>`: project name (defaults to cwd basename)
+    - `-p, --project <name>`: project name (defaults to `.env` header, then cwd basename)
     - `-y, --yes`: accept defaults for prompts (non-interactive)
 
 ## Key Providers

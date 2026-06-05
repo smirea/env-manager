@@ -40,7 +40,7 @@ env-manager <command> [options]
 
 | Option | Description |
 |--------|-------------|
-| `-p, --project <name>` | Project name (default: current directory name) |
+| `-p, --project <name>` | Project name (default: `.env` header, then current directory name) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
 | `-e, --env <name>` | Print only one environment (`print` only) |
 | `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |

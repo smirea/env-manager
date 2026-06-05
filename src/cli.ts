@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { basename } from 'path';
 import yargs, { type Argv, type CommandModule } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { checkAwsCredentials } from './aws';
@@ -23,6 +22,7 @@ import { printCommand } from './commands/print';
 import { tsCommand } from './commands/ts';
 import { upCommand } from './commands/up';
 import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
+import { resolveProjectName } from './project-name';
 import type { CommandContext } from './types';
 import { EnvManagerError } from './types';
 
@@ -45,15 +45,14 @@ const HELP_FOOTER = `Supported schema formats:
   Example: # {optional string:format(/^sk-/)}`;
 
 interface ProjectArgs {
-  project: string;
+  project?: string;
 }
 
 function withProjectOption<T>(yargs: Argv<T>): Argv<T & ProjectArgs> {
   return yargs.option("project", {
     alias: "p",
     type: "string",
-    default: basename(process.cwd()),
-    description: "Project name",
+    description: "Project name (default: .env header, then directory name)",
   }) as Argv<T & ProjectArgs>;
 }
 
@@ -74,9 +73,13 @@ function validateProjectName(project: string, command: string): void {
   }
 }
 
-function createContext(argv: ProjectArgs): CommandContext {
+function resolveProject(arg?: string): string {
+  return resolveProjectName(process.cwd(), arg);
+}
+
+function createContext(project: string): CommandContext {
   return {
-    project: argv.project,
+    project,
     cwd: process.cwd(),
   };
 }
@@ -89,9 +92,10 @@ const upCmd: CommandModule<any, any> = {
     withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
     const args = argv as unknown as ProjectArgs;
-    validateProjectName(args.project, "up");
+    const project = resolveProject(args.project);
+    validateProjectName(project, "up");
     await checkAwsCredentials();
-    await upCommand(createContext(args));
+    await upCommand(createContext(project));
   },
 };
 
@@ -103,9 +107,10 @@ const downCmd: CommandModule<any, any> = {
     withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
     const args = argv as unknown as ProjectArgs;
-    validateProjectName(args.project, 'down');
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'down');
     await checkAwsCredentials();
-    await downCommand(createContext(args));
+    await downCommand(createContext(project));
   },
 };
 
@@ -134,7 +139,9 @@ const tsCmd: CommandModule<any, any> = {
     ) as Argv<TsArgs>,
   handler: async (argv) => {
     const args = argv as unknown as TsArgs;
-    await tsCommand(createContext(args), args.path, { force: args.force });
+    await tsCommand(createContext(resolveProject(args.project)), args.path, {
+      force: args.force,
+    });
   },
 };
 
@@ -157,9 +164,10 @@ const initCmd: CommandModule<any, any> = {
     ) as Argv<InitArgs>,
   handler: async (argv) => {
     const args = argv as unknown as InitArgs;
-    validateProjectName(args.project, 'init');
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'init');
     await checkAwsCredentials();
-    await initCommand(createContext(args), { assumeYes: args.yes });
+    await initCommand(createContext(project), { assumeYes: args.yes });
   },
 };
 
@@ -200,10 +208,10 @@ const printCmd: CommandModule<any, any> = {
       }) as Argv<PrintArgs>,
   handler: async (argv) => {
     const args = argv as PrintArgs;
-    const project = args.project ?? basename(process.cwd());
+    const project = resolveProject(args.project);
     validateProjectName(project, 'print');
     await checkAwsCredentials();
-    await printCommand(createContext({ project }), { environment: args.env });
+    await printCommand(createContext(project), { environment: args.env });
   },
 };
 
@@ -224,8 +232,9 @@ const envSetCmd: CommandModule<any, any> = {
     if (!args.environment) {
       throw new EnvManagerError('Usage: env-manager env set <environment>');
     }
-    validateProjectName(args.project, 'env');
-    await envSetCommand(createContext(args), args.environment);
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'env');
+    await envSetCommand(createContext(project), args.environment);
   },
 };
 
@@ -235,9 +244,10 @@ const envListCmd: CommandModule<any, any> = {
   describe: 'List environments stored for a project',
   handler: async (argv) => {
     const args = argv as unknown as ProjectArgs;
-    validateProjectName(args.project, 'env');
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'env');
     await checkAwsCredentials();
-    await envListCommand(createContext(args));
+    await envListCommand(createContext(project));
   },
 };
 
@@ -254,9 +264,10 @@ const envRmCmd: CommandModule<any, any> = {
     if (!args.environment) {
       throw new EnvManagerError('Usage: env-manager env rm <environment>');
     }
-    validateProjectName(args.project, 'env');
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'env');
     await checkAwsCredentials();
-    await envRmCommand(createContext(args), args.environment);
+    await envRmCommand(createContext(project), args.environment);
   },
 };
 
@@ -408,7 +419,7 @@ const globalSetCmd: CommandModule<any, any> = {
   handler: async (argv) => {
     await checkAwsCredentials();
     const input = parseGlobalSetInput(argv as GlobalSetArgs);
-    await globalSetCommand(createContext({ project: 'default' }), input);
+    await globalSetCommand(createContext('default'), input);
   },
 };
 
@@ -422,7 +433,7 @@ const globalGetCmd: CommandModule<any, any> = {
     }) as Argv<GlobalGetArgs>,
   handler: async (argv) => {
     await checkAwsCredentials();
-    await globalGetCommand(createContext({ project: 'default' }), argv.name);
+    await globalGetCommand(createContext('default'), argv.name);
   },
 };
 
@@ -433,7 +444,7 @@ const globalListCmd: CommandModule<any, any> =
     describe: "List global default env vars",
     handler: async () => {
       await checkAwsCredentials();
-      await globalListCommand(createContext({ project: 'default' }));
+      await globalListCommand(createContext('default'));
     },
   };
 
@@ -461,7 +472,7 @@ const globalRmCmd: CommandModule<any, any> = {
       throw new EnvManagerError('Usage: env-manager global rm <name>');
     }
     await checkAwsCredentials();
-    await globalRmCommand(createContext({ project: "default" }), argv.name);
+    await globalRmCommand(createContext("default"), argv.name);
   },
 };
 
@@ -546,8 +557,9 @@ const newKeyCmd: CommandModule<any, any> = {
         "Key name required. Usage: env-manager new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys"
       );
     }
+    const project = resolveProject(args.project);
     await checkAwsCredentials();
-    await newKeyCommand(createContext(args), args.key, {
+    await newKeyCommand(createContext(project), args.key, {
       assumeYes: args.yes,
       name: args.name,
       credit: args.credit,
