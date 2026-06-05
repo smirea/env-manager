@@ -7,6 +7,7 @@ import { tsCommand, updateConfiguredTsOutput } from './ts';
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
   try {
+    await writeFile(path.join(dir, 'package.json'), '{}\n');
     return await fn(dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -162,6 +163,26 @@ describe('ts command', () => {
         'utf8'
       );
       expect(output).toContain('FOO: z.coerce.number().int(),');
+    });
+  });
+
+  test('rejects ts generation outside ts values mode', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(
+        path.join(dir, '.env'),
+        [
+          '# env-manager: test-project | 2025-01-01T00:00:00Z',
+          '# env-manager values.format: swift',
+          '# env-manager values.path: Config/LocalSecrets.xcconfig',
+          '',
+          'FOO=bar # {string}',
+          '',
+        ].join('\n')
+      );
+
+      await expect(
+        tsCommand({ project: 'test-project', cwd: dir })
+      ).rejects.toThrow('only works when values.format is "ts"');
     });
   });
 });

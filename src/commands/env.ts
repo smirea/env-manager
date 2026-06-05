@@ -12,6 +12,33 @@ import {
 } from '../project-secret';
 import type { CommandContext } from '../types';
 import { EnvManagerError } from '../types';
+import {
+  resolveValuesConfig,
+  resolveValuesOutputPath,
+} from '../values-config';
+
+async function resolveEnvironmentValuesPath(
+  ctx: CommandContext
+): Promise<string | undefined> {
+  const envPath = `${ctx.cwd}/.env`;
+  const envFile = Bun.file(envPath);
+  if (!(await envFile.exists())) {
+    return undefined;
+  }
+
+  const envContent = await envFile.text();
+  const parsed = parseEnvFile(envContent);
+  if (parsed.header && parsed.header.project !== ctx.project) {
+    throw new EnvManagerError(
+      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
+    );
+  }
+
+  const valuesConfig = await resolveValuesConfig(ctx, envContent);
+  return valuesConfig.format === 'ts'
+    ? resolveValuesOutputPath(ctx, valuesConfig)
+    : undefined;
+}
 
 export async function envSetCommand(
   ctx: CommandContext,
@@ -19,22 +46,13 @@ export async function envSetCommand(
 ): Promise<void> {
   validateEnvironmentName(environment);
 
-  const envPath = `${ctx.cwd}/.env`;
-  const envFile = Bun.file(envPath);
-  if (await envFile.exists()) {
-    const parsed = parseEnvFile(await envFile.text());
-    if (parsed.header && parsed.header.project !== ctx.project) {
-      throw new EnvManagerError(
-        `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
-      );
-    }
-  }
+  const environmentPath =
+    (await resolveEnvironmentValuesPath(ctx)) ?? `${ctx.cwd}/.env.local`;
 
-  const localPath = `${ctx.cwd}/.env.local`;
-  const localFile = Bun.file(localPath);
+  const localFile = Bun.file(environmentPath);
   const localContent = (await localFile.exists()) ? await localFile.text() : '';
   await Bun.write(
-    localPath,
+    environmentPath,
     upsertEnvironmentInContent(localContent, environment)
   );
   console.log(`Set default environment to ${environment}`);
@@ -49,7 +67,9 @@ export async function envListCommand(ctx: CommandContext): Promise<void> {
     );
   }
 
-  const current = await resolveEnvironment(ctx.cwd);
+  const current = await resolveEnvironment(ctx.cwd, {
+    valuesPath: await resolveEnvironmentValuesPath(ctx),
+  });
   const environments = listProjectEnvironments(secret);
   if (environments.length === 0) {
     console.log(`No environments found for project "${ctx.project}".`);

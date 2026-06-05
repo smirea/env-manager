@@ -3,6 +3,7 @@ import { removeEnvironmentFromContent } from '../environment';
 import { parseEnvFile } from '../parser';
 import type { CommandContext, EnvVarSchema } from '../types';
 import { EnvManagerError } from '../types';
+import { resolveValuesConfig } from '../values-config';
 
 const TS_PATH_COMMENT_PREFIX = '# env-manager ts: ';
 const DEFAULT_OUTPUT_PATH = 'src/env.ts';
@@ -106,6 +107,7 @@ export async function tsCommand(
   }
 
   const content = removeEnvironmentFromContent(await envFile.text());
+  await assertTsValuesMode(ctx, content);
   const storedPath = parseTsPathFromEnv(content);
 
   if (outputPath && storedPath && outputPath !== storedPath && !options?.force) {
@@ -153,6 +155,11 @@ export async function updateConfiguredTsOutput(
   envContent: string
 ): Promise<void> {
   const content = removeEnvironmentFromContent(envContent);
+  const valuesConfig = await resolveValuesConfig(ctx, content);
+  if (valuesConfig.format !== 'ts') {
+    return;
+  }
+
   const outputPath = parseTsPathFromEnv(content);
 
   if (!outputPath) {
@@ -161,4 +168,16 @@ export async function updateConfiguredTsOutput(
 
   await writeTsOutput(ctx, content, outputPath);
   console.log(`Generated ${outputPath}`);
+}
+
+async function assertTsValuesMode(
+  ctx: CommandContext,
+  envContent: string
+): Promise<void> {
+  const valuesConfig = await resolveValuesConfig(ctx, envContent);
+  if (valuesConfig.format !== 'ts') {
+    throw new EnvManagerError(
+      `env-manager ts only works when values.format is "ts" (currently "${valuesConfig.format}").`
+    );
+  }
 }

@@ -1,26 +1,21 @@
 import { createAwsAdapter, secretName } from "../aws";
-import {
-  resolveEnvironment,
-  upsertEnvironmentInContent,
-} from "../environment";
+import { resolveEnvironment } from "../environment";
 import { writeFilesFromPayload } from "../file-sync";
-import {
-  generateLocalEnvContent,
-  parseEnvFile,
-  parseEnvValues,
-} from "../parser";
+import { parseEnvFile, parseEnvValues } from "../parser";
 import { normalizeProjectSecret } from "../project-secret";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
+import {
+  resolveValuesConfig,
+  writeValuesForConfig,
+} from "../values-config";
 import { updateConfiguredTsOutput } from "./ts";
 
 export async function downCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
-  const localPath = `${ctx.cwd}/.env.local`;
 
   const aws = createAwsAdapter();
-  const environment = await resolveEnvironment(ctx.cwd);
   const secret = await aws.getSecret(secretName(ctx.project));
 
   if (!secret) {
@@ -30,6 +25,10 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
   }
 
   const projectSecret = normalizeProjectSecret(secret);
+  const valuesConfig = await resolveValuesConfig(ctx, projectSecret.schema);
+  const environment = await resolveEnvironment(ctx.cwd, {
+    valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
+  });
   const envPayload = projectSecret.environments[environment];
   if (!envPayload) {
     throw new EnvManagerError(
@@ -47,15 +46,16 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
 
   await Bun.write(envPath, projectSecret.schema);
 
-  await Bun.write(
-    localPath,
-    upsertEnvironmentInContent(
-      generateLocalEnvContent(parsed.schema, values, {
-        project: parsed.header?.project ?? ctx.project,
-        syncDate: envPayload.syncDate,
-      }),
-      environment
-    )
+  await writeValuesForConfig(
+    ctx,
+    valuesConfig,
+    parsed.schema,
+    values,
+    environment,
+    {
+      project: parsed.header?.project ?? ctx.project,
+      syncDate: envPayload.syncDate,
+    }
   );
   await updateConfiguredTsOutput(ctx, projectSecret.schema);
 

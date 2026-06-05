@@ -2,7 +2,6 @@ import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
   resolveEnvironment,
-  upsertEnvironmentInContent,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import {
@@ -21,11 +20,16 @@ import {
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
+import {
+  parseSwiftValues,
+  resolveValuesConfig,
+  resolveValuesOutputPath,
+  writeValuesForConfig,
+} from "../values-config";
 import { updateConfiguredTsOutput } from "./ts";
 
 export async function upCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
-  const localPath = `${ctx.cwd}/.env.local`;
 
   const envFile = Bun.file(envPath);
   if (!(await envFile.exists())) {
@@ -50,7 +54,10 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   const aws = createAwsAdapter();
   const now = new Date().toISOString();
-  const environment = await resolveEnvironment(ctx.cwd);
+  const valuesConfig = await resolveValuesConfig(ctx, envContent);
+  const environment = await resolveEnvironment(ctx.cwd, {
+    valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
+  });
   const existingSecret = await aws.getSecret(secretName(ctx.project));
   const existingProject = existingSecret
     ? normalizeProjectSecret(existingSecret)
@@ -71,11 +78,15 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   }
 
   let values: Record<string, string> = {};
-  const localFile = Bun.file(localPath);
-  let localContent: string | null = null;
-  if (await localFile.exists()) {
-    localContent = await localFile.text();
-    values = parseEnvValues(localContent);
+  const valuesPath = resolveValuesOutputPath(ctx, valuesConfig);
+  const valuesFile = Bun.file(valuesPath);
+  const valuesFileExists = await valuesFile.exists();
+  if (valuesFileExists) {
+    const valuesContent = await valuesFile.text();
+    values =
+      valuesConfig.format === 'swift'
+        ? parseSwiftValues(valuesContent)
+        : parseEnvValues(valuesContent);
   }
 
   const result = validateEnv(parsed.schema, values);
@@ -109,14 +120,18 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     ? now
     : existingEnvironment?.syncDate ?? now;
 
-  if (valuesChanged && localContent !== null) {
-    const updatedLocalContent = upsertEnvironmentInContent(
-      upsertHeaderSyncDate(localContent, ctx.project, valuesSyncDate),
-      environment
+  if (valuesChanged && valuesFileExists && valuesConfig.format === 'ts') {
+    await writeValuesForConfig(
+      ctx,
+      valuesConfig,
+      parsed.schema,
+      values,
+      environment,
+      {
+        project: parsed.header?.project ?? ctx.project,
+        syncDate: valuesSyncDate,
+      }
     );
-    if (updatedLocalContent !== localContent) {
-      await Bun.write(localPath, updatedLocalContent);
-    }
   }
 
   const environments = {

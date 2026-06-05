@@ -5,6 +5,10 @@ export const DEFAULT_ENVIRONMENT = 'local';
 const ENV_COMMENT_PREFIX = '# env-manager env: ';
 const ENV_NAME_PATTERN = /^[^\s|]+$/;
 
+type ResolveEnvironmentOptions = {
+  valuesPath?: string;
+};
+
 export function validateEnvironmentName(environment: string): void {
   if (!ENV_NAME_PATTERN.test(environment)) {
     throw new EnvManagerError(
@@ -33,12 +37,30 @@ export function resolveEnvironmentFromContent(content: string): string {
   return DEFAULT_ENVIRONMENT;
 }
 
-export async function resolveEnvironment(cwd: string): Promise<string> {
-  const localFile = Bun.file(`${cwd}/.env.local`);
-  if (!(await localFile.exists())) {
-    return DEFAULT_ENVIRONMENT;
+export async function resolveEnvironment(
+  cwd: string,
+  options: ResolveEnvironmentOptions = {}
+): Promise<string> {
+  const candidates = options.valuesPath
+    ? [options.valuesPath, '.env.local']
+    : ['.env.local'];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+
+    const path = candidate.startsWith('/') ? candidate : `${cwd}/${candidate}`;
+    const localFile = Bun.file(path);
+    if (!(await localFile.exists())) {
+      continue;
+    }
+    return resolveEnvironmentFromContent(await localFile.text());
   }
-  return resolveEnvironmentFromContent(await localFile.text());
+
+  return DEFAULT_ENVIRONMENT;
 }
 
 export function upsertEnvironmentInContent(

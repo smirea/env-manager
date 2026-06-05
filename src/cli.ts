@@ -19,6 +19,7 @@ import { initCommand } from './commands/init';
 import { listCommand } from './commands/list';
 import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
+import { setCommand } from './commands/set';
 import { tsCommand } from './commands/ts';
 import { upCommand } from './commands/up';
 import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
@@ -102,7 +103,7 @@ const upCmd: CommandModule<any, any> = {
 const downCmd: CommandModule<any, any> = {
   command: "down",
   describe:
-    "Download schema + current environment values from AWS and write .env/.env.local files",
+    "Download schema + current environment values from AWS and write configured files",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(yargs) as Argv<ProjectArgs>,
   handler: async (argv) => {
@@ -122,7 +123,7 @@ interface TsArgs extends ProjectArgs {
 const tsCmd: CommandModule<any, any> = {
   command: "ts [path]",
   describe:
-    "Generate a Zod-validated env.ts from the .env schema for typed access",
+    "Generate a Zod-validated env.ts from the .env schema in ts values mode",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
       yargs
@@ -147,6 +148,8 @@ const tsCmd: CommandModule<any, any> = {
 
 interface InitArgs extends ProjectArgs {
   yes: boolean;
+  valuesFormat?: string;
+  valuesPath?: string;
 }
 
 const initCmd: CommandModule<any, any> = {
@@ -155,19 +158,64 @@ const initCmd: CommandModule<any, any> = {
     "Initialize .env from AWS if it exists, otherwise create a new template",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      yargs.option("yes", {
-        alias: "y",
-        type: "boolean",
-        default: false,
-        description: "Accept defaults for prompts",
-      })
-    ) as Argv<InitArgs>,
+      yargs
+        .option("yes", {
+          alias: "y",
+          type: "boolean",
+          default: false,
+          description: "Accept defaults for prompts",
+        })
+        .option('values-format', {
+          type: 'string',
+          choices: ['ts', 'swift'],
+          description: 'Values output format',
+        })
+        .option('values-path', {
+          type: 'string',
+          description: 'Values output path',
+        })
+    ) as unknown as Argv<InitArgs>,
   handler: async (argv) => {
     const args = argv as unknown as InitArgs;
     const project = resolveProject(args.project);
     validateProjectName(project, 'init');
     await checkAwsCredentials();
-    await initCommand(createContext(project), { assumeYes: args.yes });
+    await initCommand(createContext(project), {
+      assumeYes: args.yes,
+      valuesFormat: args.valuesFormat,
+      valuesPath: args.valuesPath,
+    });
+  },
+};
+
+interface SetArgs extends ProjectArgs {
+  field?: string;
+  value?: string;
+}
+
+const setCmd: CommandModule<any, any> = {
+  command: 'set <field> <value>',
+  describe: 'Set project config stored in .env',
+  builder: (yargs: Argv<Record<string, never>>) =>
+    withProjectOption(
+      yargs
+        .positional('field', {
+          type: 'string',
+          description: 'Config field: values.format or values.path',
+        })
+        .positional('value', {
+          type: 'string',
+          description: 'Config value',
+        })
+    ) as Argv<SetArgs>,
+  handler: async (argv) => {
+    const args = argv as unknown as SetArgs;
+    if (!args.field || !args.value) {
+      throw new EnvManagerError('Usage: env-manager set <field> <value>');
+    }
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'set');
+    await setCommand(createContext(project), args.field, args.value);
   },
 };
 
@@ -578,6 +626,7 @@ async function run() {
     initCmd,
     listCmd,
     printCmd,
+    setCmd,
     envCmd,
     globalCmd,
     newKeyCmd,

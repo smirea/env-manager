@@ -2,20 +2,23 @@ import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
   resolveEnvironment,
-  upsertEnvironmentInContent,
 } from "../environment";
 import { writeFilesFromPayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
-import {
-  generateLocalEnvContent,
-  parseEnvFile,
-  parseEnvValues,
-} from "../parser";
+import { parseEnvFile, parseEnvValues } from "../parser";
 import { normalizeProjectSecret } from "../project-secret";
 import { promptLine } from "../prompt";
 import type { CommandContext, EnvVarSchema } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
+import {
+  createValuesConfig,
+  readValuesForConfig,
+  resolveValuesConfig,
+  type ValuesConfig,
+  upsertValuesConfig,
+  writeValuesForConfig,
+} from "../values-config";
 
 const TEMPLATE = `# env-manager: {{PROJECT}} | {{DATE}}
 
@@ -25,6 +28,8 @@ const TEMPLATE = `# env-manager: {{PROJECT}} | {{DATE}}
 
 type InitOptions = {
   assumeYes?: boolean;
+  valuesFormat?: string;
+  valuesPath?: string;
 };
 
 async function promptYesNo(
@@ -54,7 +59,8 @@ async function promptYesNo(
 
 type CopyGlobalDefaultsParams = {
   aws: ReturnType<typeof createAwsAdapter>;
-  localPath: string;
+  ctx: CommandContext;
+  valuesConfig: ValuesConfig;
   assumeYes: boolean;
   environment: string;
   restrictToNames: Set<string> | null;
@@ -77,7 +83,8 @@ function collectEnvVarNames(content: string): string[] {
 
 async function copyGlobalDefaults({
   aws,
-  localPath,
+  ctx,
+  valuesConfig,
   assumeYes,
   environment,
   restrictToNames,
@@ -124,11 +131,7 @@ async function copyGlobalDefaults({
   }
   console.log();
 
-  let localValues: Record<string, string> = {};
-  const localFile = Bun.file(localPath);
-  if (await localFile.exists()) {
-    localValues = parseEnvValues(await localFile.text());
-  }
+  const localValues = await readValuesForConfig(ctx, valuesConfig);
 
   let copiedAny = false;
   for (const name of candidateNames) {
@@ -147,16 +150,36 @@ async function copyGlobalDefaults({
   }
 
   if (copiedAny) {
-    const localContent = upsertEnvironmentInContent(
-      generateLocalEnvContent(localSchema, localValues, {
+    await writeValuesForConfig(
+      ctx,
+      valuesConfig,
+      localSchema,
+      localValues,
+      environment,
+      {
         project,
         syncDate: new Date().toISOString(),
-      }),
-      environment
+      }
     );
-    await Bun.write(localPath, localContent);
-    console.log(`\nCopied selected keys to .env.local`);
+    console.log(`\nCopied selected keys to ${valuesConfig.path}`);
   }
+}
+
+function getInitValuesConfig(options: InitOptions): ValuesConfig | null {
+  const hasFormat = options.valuesFormat !== undefined;
+  const hasPath = options.valuesPath !== undefined;
+
+  if (!hasFormat && !hasPath) {
+    return null;
+  }
+
+  if (!options.valuesFormat || !options.valuesPath) {
+    throw new EnvManagerError(
+      'Use --values-format and --values-path together.'
+    );
+  }
+
+  return createValuesConfig(options.valuesFormat, options.valuesPath);
 }
 
 export async function initCommand(
@@ -164,19 +187,25 @@ export async function initCommand(
   options: InitOptions = {}
 ): Promise<void> {
   const assumeYes = options.assumeYes === true;
+  const initValuesConfig = getInitValuesConfig(options);
   const envPath = `${ctx.cwd}/.env`;
-  const localPath = `${ctx.cwd}/.env.local`;
   const envFile = Bun.file(envPath);
   const envAlreadyExists = await envFile.exists();
   const aws = createAwsAdapter();
   let envContent = envAlreadyExists ? await envFile.text() : "";
 
   if (!envAlreadyExists) {
-    const environment = await resolveEnvironment(ctx.cwd);
     const secret = await aws.getSecret(secretName(ctx.project));
 
     if (secret) {
       const projectSecret = normalizeProjectSecret(secret);
+      const schemaContent = initValuesConfig
+        ? upsertValuesConfig(projectSecret.schema, initValuesConfig)
+        : projectSecret.schema;
+      const valuesConfig = await resolveValuesConfig(ctx, schemaContent);
+      const environment = await resolveEnvironment(ctx.cwd, {
+        valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
+      });
       const envPayload = projectSecret.environments[environment];
       if (!envPayload) {
         throw new EnvManagerError(
@@ -184,7 +213,7 @@ export async function initCommand(
         );
       }
 
-      const parsed = parseEnvFile(projectSecret.schema);
+      const parsed = parseEnvFile(schemaContent);
       const values = parseEnvValues(envPayload.values);
       const result = validateEnv(parsed.schema, values);
       assertValid(result);
@@ -194,16 +223,17 @@ export async function initCommand(
         envPayload.files,
         ctx.cwd
       );
-      await Bun.write(envPath, projectSecret.schema);
-      await Bun.write(
-        localPath,
-        upsertEnvironmentInContent(
-          generateLocalEnvContent(parsed.schema, values, {
-            project: parsed.header?.project ?? ctx.project,
-            syncDate: envPayload.syncDate,
-          }),
-          environment
-        )
+      await Bun.write(envPath, schemaContent);
+      await writeValuesForConfig(
+        ctx,
+        valuesConfig,
+        parsed.schema,
+        values,
+        environment,
+        {
+          project: parsed.header?.project ?? ctx.project,
+          syncDate: envPayload.syncDate,
+        }
       );
       console.log(
         `Downloaded .env from AWS for project "${ctx.project}" environment "${environment}"`
@@ -216,10 +246,13 @@ export async function initCommand(
       envContent = envContentWithoutEnvironment;
       await Bun.write(envPath, envContent);
     }
+    if (initValuesConfig) {
+      envContent = upsertValuesConfig(envContent, initValuesConfig);
+      await Bun.write(envPath, envContent);
+    }
     console.log(`.env already exists at ${envPath}, skipping creation.`);
   }
 
-  const environment = await resolveEnvironment(ctx.cwd);
   let restrictToNames: Set<string> | null = null;
   if (envAlreadyExists) {
     const names = collectEnvVarNames(envContent);
@@ -230,14 +263,23 @@ export async function initCommand(
       "{{DATE}}",
       now
     );
+    if (initValuesConfig) {
+      envContent = upsertValuesConfig(envContent, initValuesConfig);
+    }
+    await resolveValuesConfig(ctx, envContent);
     await Bun.write(envPath, envContent);
     console.log(`Created new .env template for project "${ctx.project}"`);
   }
+  const valuesConfig = await resolveValuesConfig(ctx, envContent);
+  const environment = await resolveEnvironment(ctx.cwd, {
+    valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
+  });
   const localSchema = parseEnvFile(envContent).schema;
 
   await copyGlobalDefaults({
     aws,
-    localPath,
+    ctx,
+    valuesConfig,
     assumeYes,
     environment,
     restrictToNames,

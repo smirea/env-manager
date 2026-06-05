@@ -20,13 +20,14 @@ env-manager <command> [options]
 | Command | Description |
 |---------|-------------|
 | `init` | Create `.env` from AWS or new template and copy matching global defaults |
-| `up` | Upload `.env` schema and `.env.local` values for the current environment to AWS |
-| `down` | Download `.env` and `.env.local` for the current environment from AWS |
-| `ts [path]` | Generate typed `env.ts` file (default: `src/env.ts`) |
+| `up` | Upload `.env` schema and configured values for the current environment to AWS |
+| `down` | Download `.env` and configured values for the current environment from AWS |
+| `ts [path]` | Generate typed `env.ts` file in `ts` values mode (default: `src/env.ts`) |
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
 | `print [project]` | Print all stored environments for a project |
 | `print [project] -e <env>` | Print one stored environment for a project |
-| `env set <env>` | Set the default environment stored in `.env.local` |
+| `set <field> <value>` | Set project config in `.env` (`values.format`, `values.path`) |
+| `env set <env>` | Set the default environment marker |
 | `env list` (`env ls`) | List environments for a project |
 | `env rm <env>` | Remove an environment from AWS |
 | `global set` | Set a global default env var |
@@ -42,6 +43,8 @@ env-manager <command> [options]
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: `.env` header, then current directory name) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
+| `--values-format <ts\|swift>` | Values output format (`init` only) |
+| `--values-path <path>` | Values output path (`init` only) |
 | `-e, --env <name>` | Print only one environment (`print` only) |
 | `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
 | `--credit <usd>` | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`) |
@@ -83,11 +86,46 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
 `file` values are file paths. On sync, file contents are stored in the secret and written back to the same path when downloading. Files must be valid UTF-8 text (binary files are rejected).
 
+## Values Output
+
+The values output is configured in `.env`:
+
+```bash
+# env-manager values.format: ts
+# env-manager values.path: .env.local
+```
+
+Supported formats:
+
+| Format | Output |
+|--------|--------|
+| `ts` | dotenv-style values with env-manager metadata, normally `.env.local` |
+| `swift` | Xcode `.xcconfig` values like `API_KEY = secret` |
+
+If the values config is missing and `package.json` exists, env-manager assumes
+the legacy TypeScript behavior: `values.format=ts` and `values.path=.env.local`.
+Without config or `package.json`, commands that read or write values fail.
+
+For Swift/Xcode projects:
+
+```bash
+env-manager init --values-format swift --values-path Config/LocalSecrets.xcconfig
+```
+
+To update config later:
+
+```bash
+env-manager set values.format swift
+env-manager set values.path Config/LocalSecrets.xcconfig
+```
+
+`env-manager ts` only runs when `values.format` is `ts`.
+
 ## Environments
 
 Project values are grouped by environment. The current environment is stored in
-`.env.local`, which should stay git ignored. If `.env.local` has no environment
-comment, the current environment is `local`.
+the configured `ts` values file, or in `.env.local` for non-`ts` values formats.
+If no environment comment exists, the current environment is `local`.
 
 ```bash
 env-manager env set staging
@@ -95,7 +133,7 @@ env-manager env ls
 env-manager env rm staging
 ```
 
-`env set` only updates `.env.local`:
+`env set` only updates the environment comment:
 
 ```bash
 # env-manager env: staging
@@ -174,7 +212,8 @@ env-manager init
 
 Creates `.env` from AWS if the project exists, otherwise creates a new template.
 If `.env` is already present, `env-manager init` leaves it untouched and simply
-re-syncs `.env.local` with any global defaults that share a schema entry.
+re-syncs the configured values file with any global defaults that share a schema
+entry.
 
 If global defaults contains keys, you'll be prompted to copy them:
 ```
@@ -189,9 +228,9 @@ To copy all defaults without prompts:
 env-manager init --yes
 ```
 
-Re-running `env-manager init` later is an easy way to refresh `.env.local`
-with any new global defaults you've added. Only keys that exist in `.env`
-are considered, so unrelated global values stay untouched.
+Re-running `env-manager init` later is an easy way to refresh the configured
+values file with any new global defaults you've added. Only keys that exist in
+`.env` are considered, so unrelated global values stay untouched.
 
 ### 2. Define your schema
 
@@ -207,7 +246,8 @@ DEBUG= # {optional bool}
 
 ### 3. Add values locally
 
-Create `.env.local` with actual values (not committed to git):
+Create the configured values file with actual values (not committed to git).
+For the default `ts` format this is `.env.local`:
 
 ```bash
 # env-manager: my-app | 2025-01-27T10:00:00-05:00
@@ -219,8 +259,9 @@ DEBUG=true
 ```
 
 The `.env` header date versions the schema/template. It only changes when the
-stored schema changes. The `.env.local` header date versions the actual values,
-and the `.env.local` environment comment selects which values commands use.
+stored schema changes. In `ts` mode, the values file header date versions the
+actual values, and the environment comment selects which remote environment
+commands use.
 
 ### 4. Generate typed env access
 
@@ -280,9 +321,10 @@ environment. Existing single-environment secrets are treated as `local`.
 
 | File | Purpose |
 |------|---------|
-| `.env` | Schema + defaults (committed to git) |
-| `.env.local` | Actual values for the current environment (not committed) |
-| `src/env.ts` | Generated typed env access |
+| `.env` | Schema, defaults, and env-manager config (committed to git) |
+| `.env.local` | Default `ts` values file and non-`ts` environment selector |
+| `Config/LocalSecrets.xcconfig` | Common Swift/Xcode values file |
+| `src/env.ts` | Generated typed env access for `ts` mode |
 
 ## License
 

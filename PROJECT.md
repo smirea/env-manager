@@ -23,19 +23,23 @@ utility to manage my own environment variables for all my personal projects
 
 2. store projects in aws secrets manager (both schema and data) in namespace `env-manager/<project>`
 
+    values output is configured in `.env` with `# env-manager values.format: ts|swift` and `# env-manager values.path: <path>`. missing config falls back to `ts` + `.env.local` only when `package.json` exists.
+
 3. cli script
 
-    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and `.env.local` values. `.env` date only changes when the schema/template changes from AWS; `.env.local` date only changes when values change. defaults project to the `.env` header, then basename of cwd
+    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and configured values. `.env` date only changes when the schema/template changes from AWS; the values file date only changes in `ts` mode when values change. defaults project to the `.env` header, then basename of cwd
 
-    3.2. `env-manager down [-p --project=<name>]` - syncs both `.env` and `.env.local` from aws, preserving the stored schema date and writing the stored value date to `.env.local`
+    3.2. `env-manager down [-p --project=<name>]` - syncs `.env` and configured values from aws, preserving the stored schema date and writing the stored value date in `ts` mode
 
-    3.3. `env-manager ts [path]` - generates typed env file (defaults to `src/env.ts`) with zod schema and `z.parse(process.env)`
+    3.3. `env-manager ts [path]` - generates typed env file in `ts` values mode (defaults to `src/env.ts`) with zod schema and `z.parse(process.env)`
 
-    3.4. `env-manager init [-p --project=<name>]` - creates `.env` from aws if project exists, otherwise creates empty template with header
+    3.4. `env-manager init [-p --project=<name>] [--values-format ts|swift --values-path <path>]` - creates `.env` from aws if project exists, otherwise creates empty template with header
 
     3.5. `env-manager list` - lists all projects in `env-manager/*` namespace
 
-    3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to `.env.local`, syncs to AWS. auto-adds schema entry if missing.
+    3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to configured values, syncs to AWS. auto-adds schema entry if missing.
+
+    3.7. `env-manager set <field> <value>` - sets `.env` config fields like `values.format` and `values.path`
 
     flags:
     - `-p, --project <name>`: project name (defaults to `.env` header, then cwd basename)
@@ -79,7 +83,7 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 - validator parsing is strict and rejects unknown or invalid validators
 - header detection tolerates leading non-schema comments before the header
 - file sync only supports UTF-8 text; binary files are rejected
-- latest matching version is source of truth: `.env` tracks schema/template version, `.env.local` tracks value version
+- latest matching version is source of truth: `.env` tracks schema/template version, `ts` values files track value version
 
 ## Generated TypeScript (env-manager ts)
 

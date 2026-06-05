@@ -2,7 +2,6 @@ import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
   resolveEnvironment,
-  upsertEnvironmentInContent,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
@@ -14,7 +13,6 @@ import {
   appendSchemaEntry,
   envContentEqualIgnoringSyncDate,
   envValuesEqual,
-  generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
   serializeEnvValues,
@@ -28,6 +26,11 @@ import {
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
+import {
+  readValuesForConfig,
+  resolveValuesConfig,
+  writeValuesForConfig,
+} from "../values-config";
 
 type NewKeyOptions = {
   assumeYes?: boolean;
@@ -239,7 +242,6 @@ export async function newKeyCommand(
   }
 
   const envPath = `${ctx.cwd}/.env`;
-  const localPath = `${ctx.cwd}/.env.local`;
 
   const envFile = Bun.file(envPath);
   if (!(await envFile.exists())) {
@@ -268,7 +270,10 @@ export async function newKeyCommand(
     envContentChanged = true;
     parsed = parseEnvFile(envContent);
   }
-  const environment = await resolveEnvironment(ctx.cwd);
+  const valuesConfig = await resolveValuesConfig(ctx, envContent);
+  const environment = await resolveEnvironment(ctx.cwd, {
+    valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
+  });
 
   const existsInSchema = parsed.schema.some((s) => s.name === keyName);
   if (!existsInSchema) {
@@ -323,11 +328,7 @@ export async function newKeyCommand(
     );
   }
 
-  let localValues: Record<string, string> = {};
-  const localFile = Bun.file(localPath);
-  if (await localFile.exists()) {
-    localValues = parseEnvValues(await localFile.text());
-  }
+  const localValues = await readValuesForConfig(ctx, valuesConfig);
   const previousLocalValues = { ...localValues };
   localValues[keyName] = key;
   const updatedParsed = parseEnvFile(envContent);
@@ -384,15 +385,16 @@ export async function newKeyCommand(
     await Bun.write(envPath, envContent);
   }
   if (localValuesChanged) {
-    await Bun.write(
-      localPath,
-      upsertEnvironmentInContent(
-        generateLocalEnvContent(updatedParsed.schema, localValues, {
-          project: ctx.project,
-          syncDate: valuesSyncDate,
-        }),
-        environment
-      )
+    await writeValuesForConfig(
+      ctx,
+      valuesConfig,
+      updatedParsed.schema,
+      localValues,
+      environment,
+      {
+        project: ctx.project,
+        syncDate: valuesSyncDate,
+      }
     );
   }
 
