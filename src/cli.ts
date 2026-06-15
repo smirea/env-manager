@@ -19,6 +19,7 @@ import { initCommand } from './commands/init';
 import { listCommand } from './commands/list';
 import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
+import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
 import { tsCommand } from './commands/ts';
 import { upCommand } from './commands/up';
@@ -63,7 +64,7 @@ function validateProjectName(project: string, command: string): void {
       `Invalid project name "${project}". Project names cannot include spaces or "|".`
     );
   }
-  const commandsRestrictingDefault = ['up', 'down', 'init', 'env'];
+  const commandsRestrictingDefault = ['up', 'down', 'init', 'env', 'rm'];
   if (
     commandsRestrictingDefault.includes(command) &&
     RESERVED_PROJECT_NAMES.includes(project)
@@ -112,6 +113,30 @@ const downCmd: CommandModule<any, any> = {
     validateProjectName(project, 'down');
     await checkAwsCredentials();
     await downCommand(createContext(project));
+  },
+};
+
+const rmCmd: CommandModule<any, any> = {
+  command: 'rm [project]',
+  describe:
+    'Delete the project secret from AWS Secrets Manager without touching local files',
+  builder: (yargs: Argv<Record<string, never>>) =>
+    yargs
+      .positional('project', {
+        type: 'string',
+        description: 'Project name',
+      })
+      .option('project', {
+        alias: 'p',
+        type: 'string',
+        description: 'Project name',
+      }) as Argv<ProjectArgs>,
+  handler: async (argv) => {
+    const args = argv as unknown as ProjectArgs;
+    const project = resolveProject(args.project);
+    validateProjectName(project, 'rm');
+    await checkAwsCredentials();
+    await rmCommand(createContext(project));
   },
 };
 
@@ -622,6 +647,7 @@ async function run() {
   const rootCommands: Array<CommandModule<any, any>> = [
     upCmd,
     downCmd,
+    rmCmd,
     tsCmd,
     initCmd,
     listCmd,

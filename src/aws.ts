@@ -1,5 +1,6 @@
 import {
   CreateSecretCommand,
+  DeleteSecretCommand,
   GetSecretValueCommand,
   ListSecretsCommand,
   PutSecretValueCommand,
@@ -12,6 +13,7 @@ import { AwsError } from './types';
 export interface AwsAdapter {
   getSecret(name: string): Promise<SecretPayload | null>;
   putSecret(name: string, payload: SecretPayload): Promise<void>;
+  deleteSecret(name: string): Promise<boolean>;
   listSecrets(prefix: string): Promise<string[]>;
 }
 
@@ -123,6 +125,21 @@ class AwsSdkAdapter implements AwsAdapter {
       }
     } catch (error) {
       throw new AwsError(`Failed to save secret: ${formatAwsError(error)}`);
+    }
+  }
+
+  async deleteSecret(name: string): Promise<boolean> {
+    try {
+      await this.secrets.send(
+        new DeleteSecretCommand({
+          SecretId: name,
+          ForceDeleteWithoutRecovery: true,
+        })
+      );
+      return true;
+    } catch (error) {
+      if (isResourceNotFound(error)) return false;
+      throw new AwsError(`Failed to delete secret: ${formatAwsError(error)}`);
     }
   }
 

@@ -22,6 +22,7 @@ env-manager <command> [options]
 | `init` | Create `.env` from AWS or new template and copy matching global defaults |
 | `up` | Upload `.env` schema and configured values for the current environment to AWS |
 | `down` | Download `.env` and configured values for the current environment from AWS |
+| `rm [project]` | Delete the project secret from AWS without touching local files |
 | `ts [path]` | Generate typed `env.ts` file in `ts` values mode (default: `src/env.ts`) |
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
 | `print [project]` | Print all stored environments for a project |
@@ -292,6 +293,9 @@ env-manager up
 
 # Download from AWS Secrets Manager
 env-manager down
+
+# Delete the remote project secret while leaving local files unchanged
+env-manager rm
 
 # Print the stored secret payload for a project
 env-manager print
