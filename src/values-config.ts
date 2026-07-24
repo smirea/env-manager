@@ -76,8 +76,15 @@ export async function resolveValuesConfig(
     return { ...DEFAULT_TS_VALUES_CONFIG };
   }
 
+  console.warn(
+    [
+      'Warning: package.json not found, so env-manager could not infer the values format.',
+      'Configure Swift values, for example:',
+      '  env-manager set values.format swift && env-manager set values.path Config/LocalSecrets.xcconfig',
+    ].join('\n')
+  );
   throw new EnvManagerError(
-    'Values output is not configured. Set values.format and values.path in .env, or run init with --values-format and --values-path.'
+    'Values output is not configured.'
   );
 }
 

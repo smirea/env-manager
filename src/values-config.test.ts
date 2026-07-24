@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,14 +69,26 @@ describe('values config', () => {
     });
   });
 
-  test('errors without config or package.json fallback', async () => {
+  test('shows setup guidance without config or package.json fallback', async () => {
     await withTempDir(async (dir) => {
-      await expect(
-        resolveValuesConfig(
-          { project: 'demo', cwd: dir },
-          '# env-manager: demo | 2026-01-01T00:00:00Z\n'
-        )
-      ).rejects.toThrow('Values output is not configured');
+      const warn = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await expect(
+          resolveValuesConfig(
+            { project: 'demo', cwd: dir },
+            '# env-manager: demo | 2026-01-01T00:00:00Z\n'
+          )
+        ).rejects.toThrow('Values output is not configured');
+        expect(warn).toHaveBeenCalledWith(
+          [
+            'Warning: package.json not found, so env-manager could not infer the values format.',
+            'Configure Swift values, for example:',
+            '  env-manager set values.format swift && env-manager set values.path Config/LocalSecrets.xcconfig',
+          ].join('\n')
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 
