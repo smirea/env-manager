@@ -1,3 +1,4 @@
+import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from '../aws';
 import {
   resolveEnvironment,
@@ -51,7 +52,7 @@ export async function envSetCommand(
 
   const localFile = Bun.file(environmentPath);
   const localContent = (await localFile.exists()) ? await localFile.text() : '';
-  await Bun.write(
+  await writeManagedFile(
     environmentPath,
     upsertEnvironmentInContent(localContent, environment)
   );

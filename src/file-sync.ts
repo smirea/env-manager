@@ -1,3 +1,4 @@
+import { writeManagedFile } from './git-updates';
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { EnvValues, EnvVarSchema } from "./types";
@@ -82,6 +83,6 @@ export async function writeFilesFromPayload(
 
     const fullPath = resolvePath(cwd, rawValue);
     await mkdir(path.dirname(fullPath), { recursive: true });
-    await Bun.write(fullPath, files[s.name]);
+    await writeManagedFile(fullPath, files[s.name]);
   }
 }

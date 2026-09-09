@@ -1,3 +1,4 @@
+import { writeManagedFile } from '../git-updates';
 import { isAbsolute, join } from 'node:path';
 import { removeEnvironmentFromContent } from '../environment';
 import { parseEnvFile } from '../parser';
@@ -120,7 +121,7 @@ export async function tsCommand(
   await writeTsOutput(ctx, content, outPath);
 
   const updatedEnv = upsertTsPathInEnv(content, outPath);
-  await Bun.write(envPath, updatedEnv);
+  await writeManagedFile(envPath, updatedEnv);
 
   console.log(`Generated ${outPath}`);
 }
@@ -147,7 +148,7 @@ async function writeTsOutput(
   const fields = parsed.schema.map(generateZodField).join('\n');
   const output = HEADER + fields + '\n' + FOOTER;
 
-  await Bun.write(resolveOutputPath(ctx, outputPath), output);
+  await writeManagedFile(resolveOutputPath(ctx, outputPath), output);
 }
 
 export async function updateConfiguredTsOutput(

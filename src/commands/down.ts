@@ -1,3 +1,4 @@
+import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import { resolveEnvironment } from "../environment";
 import { writeFilesFromPayload } from "../file-sync";
@@ -44,7 +45,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
 
   await writeFilesFromPayload(parsed.schema, values, envPayload.files, ctx.cwd);
 
-  await Bun.write(envPath, projectSecret.schema);
+  await writeManagedFile(envPath, projectSecret.schema);
 
   await writeValuesForConfig(
     ctx,

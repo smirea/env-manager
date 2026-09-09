@@ -1,3 +1,4 @@
+import { writeManagedFile } from './git-updates';
 import { mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { upsertEnvironmentInContent } from './environment';
@@ -193,7 +194,7 @@ export async function writeValuesForConfig(
           environment
         );
 
-  await Bun.write(outputPath, content);
+  await writeManagedFile(outputPath, content);
 }
 
 export function generateSwiftValuesContent(

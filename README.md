@@ -38,6 +38,17 @@ env-manager <command> [options]
 | `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) |
 | `new-key --list` | List available keys |
 
+### Git updates
+
+After a successful command, tracked files that were clean before the command and
+changed by env-manager are committed together as `chore: env manager update`.
+Files that were already staged are re-added, including any unstaged edits in those
+files, and excluded from the automatic commit. Unrelated staged files stay staged.
+Files with only unstaged edits, untracked files, and ignored files are not added
+or committed. Unchanged writes do not create commits or change staging.
+This applies within the current Git repository; commands outside Git still work.
+Automatic commits stay local and are not pushed.
+
 ### Options
 
 | Option | Description |

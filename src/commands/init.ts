@@ -1,3 +1,4 @@
+import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
@@ -223,7 +224,7 @@ export async function initCommand(
         envPayload.files,
         ctx.cwd
       );
-      await Bun.write(envPath, schemaContent);
+      await writeManagedFile(envPath, schemaContent);
       await writeValuesForConfig(
         ctx,
         valuesConfig,
@@ -244,11 +245,11 @@ export async function initCommand(
     const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
     if (envContentWithoutEnvironment !== envContent) {
       envContent = envContentWithoutEnvironment;
-      await Bun.write(envPath, envContent);
+      await writeManagedFile(envPath, envContent);
     }
     if (initValuesConfig) {
       envContent = upsertValuesConfig(envContent, initValuesConfig);
-      await Bun.write(envPath, envContent);
+      await writeManagedFile(envPath, envContent);
     }
     console.log(`.env already exists at ${envPath}, skipping creation.`);
   }
@@ -267,7 +268,7 @@ export async function initCommand(
       envContent = upsertValuesConfig(envContent, initValuesConfig);
     }
     await resolveValuesConfig(ctx, envContent);
-    await Bun.write(envPath, envContent);
+    await writeManagedFile(envPath, envContent);
     console.log(`Created new .env template for project "${ctx.project}"`);
   }
   const valuesConfig = await resolveValuesConfig(ctx, envContent);

@@ -1,3 +1,4 @@
+import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
   removeEnvironmentFromContent,
@@ -149,7 +150,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   await aws.putSecret(secretName(ctx.project), payload);
   if (envContentChanged) {
-    await Bun.write(envPath, envContent);
+    await writeManagedFile(envPath, envContent);
   }
   await updateConfiguredTsOutput(ctx, envContent);
 

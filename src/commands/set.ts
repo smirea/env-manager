@@ -1,3 +1,4 @@
+import { writeManagedFile } from '../git-updates';
 import { parseEnvFile } from '../parser';
 import type { CommandContext } from '../types';
 import { EnvManagerError } from '../types';
@@ -31,7 +32,7 @@ export async function setCommand(
     normalizedField,
     value
   );
-  await Bun.write(envPath, updated);
+  await writeManagedFile(envPath, updated);
 
   console.log(`Set ${normalizedField} to ${value}`);
 }

@@ -24,6 +24,7 @@ import { setCommand } from './commands/set';
 import { tsCommand } from './commands/ts';
 import { upCommand } from './commands/up';
 import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
+import { withGitUpdates } from './git-updates';
 import { resolveProjectName } from './project-name';
 import type { CommandContext } from './types';
 import { EnvManagerError } from './types';
@@ -672,7 +673,7 @@ async function run() {
     .parse();
 }
 
-run().catch((e) => {
+withGitUpdates(process.cwd(), run).catch((e) => {
   if (e instanceof EnvManagerError) {
     console.error(`Error: ${e.message}`);
   } else {
