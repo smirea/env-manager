@@ -23,7 +23,8 @@ env-manager <command> [options]
 | `up` | Upload `.env` schema and configured values for the current environment to AWS |
 | `down` | Download `.env` and configured values for the current environment from AWS |
 | `rm [project]` | Delete the project secret from AWS without touching local files |
-| `ts [path]` | Generate typed `env.ts` file in `ts` values mode (default: `src/env.ts`) |
+| `generate [path]` (`gen`) | Generate typed `env.ts` file in `ts` values mode (default: `src/env.ts`) |
+| `ts [path]` | Deprecated alias for `generate`; still accepts the same options |
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
 | `print [project]` | Print all stored environments for a project |
 | `print [project] -e <env>` | Print one stored environment for a project |
@@ -47,13 +48,16 @@ files, and excluded from the automatic commit. Unrelated staged files stay stage
 Files with only unstaged edits, untracked files, and ignored files are not added
 or committed. Unchanged writes do not create commits or change staging.
 This applies within the current Git repository; commands outside Git still work.
-Automatic commits stay local and are not pushed.
+Automatic commits stay local and are not pushed. Pass `--local` to supported
+commands to leave changes unstaged and uncommitted (existing staging is preserved).
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: `.env` header, then current directory name) |
+| `--local` | Skip secret storage and automatic Git updates (`init`, `generate`/`gen`/`ts`, `set`, `env set`) |
+| `-f, --force` | Replace the stored TypeScript output path (`generate` only, including aliases) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
 | `--values-format <ts\|swift>` | Values output format (`init` only) |
 | `--values-path <path>` | Values output path (`init` only) |
@@ -63,6 +67,38 @@ Automatic commits stay local and are not pushed.
 | `--unlimited` | Create OpenRouter key without a credit limit (`new-key OPENROUTER_API_KEY` only) |
 | `--expiration <utc-iso>` | OpenRouter key expiration (UTC ISO-8601, `new-key OPENROUTER_API_KEY` only) |
 | `-h, --help` | Show help message |
+
+### Try it locally
+
+No AWS credentials are needed for this workflow:
+
+```bash
+env-manager init --local
+# Add schema entries to .env, then generate typed access
+env-manager gen --local
+
+# Adjust local configuration without automatic commits
+env-manager set values.format ts --local
+env-manager set values.path .env.development --local
+env-manager env set development --local
+```
+
+`init --local` creates a template or uses the existing `.env`, skips downloading
+project secrets and copying global defaults, and supports `--values-format` and
+`--values-path` as usual. For a directory without `package.json`, provide both
+values options explicitly, for example:
+
+```bash
+env-manager init --local --values-format swift --values-path Config/LocalSecrets.xcconfig
+```
+
+`generate` always reads the local schema; `--local` also disables Git updates.
+It still generates TypeScript only, requires `values.format=ts`, and keeps the
+existing `# env-manager ts: <path>` setting for compatibility. `ts` forwards to
+`generate` and prints a deprecation warning. These commands continue to use their
+normal behavior when `--local` is omitted. Commands that operate on remote secrets
+(`up`, `down`, `rm`, `list`, `print`, `env list`, `env rm`, `global`, `new-key`)
+do not accept `--local`; `new-key --list` already works without AWS.
 
 ## Schema Format
 
@@ -131,7 +167,7 @@ env-manager set values.format swift
 env-manager set values.path Config/LocalSecrets.xcconfig
 ```
 
-`env-manager ts` only runs when `values.format` is `ts`.
+`env-manager generate` only runs when `values.format` is `ts`.
 
 ## Environments
 
@@ -278,7 +314,7 @@ commands use.
 ### 4. Generate typed env access
 
 ```bash
-env-manager ts
+env-manager generate
 ```
 
 Generates `src/env.ts`:

@@ -11,7 +11,7 @@ import {
   resolveValuesConfig,
   writeValuesForConfig,
 } from "../values-config";
-import { updateConfiguredTsOutput } from "./ts";
+import { updateConfiguredTsOutput } from "./generate";
 
 export async function downCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;

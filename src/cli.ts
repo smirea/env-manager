@@ -21,7 +21,7 @@ import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
 import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
-import { tsCommand } from './commands/ts';
+import { generateCommand } from './commands/generate';
 import { upCommand } from './commands/up';
 import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
 import { withGitUpdates } from './git-updates';
@@ -49,6 +49,29 @@ const HELP_FOOTER = `Supported schema formats:
 
 interface ProjectArgs {
   project?: string;
+  local?: boolean;
+}
+
+function withLocalOption<T>(yargs: Argv<T>): Argv<T & { local: boolean }> {
+  return yargs.option("local", {
+    type: "boolean",
+    default: false,
+    description: "Use local files only, without secret storage or Git updates",
+  });
+}
+
+function withGitHandler(command: CommandModule<any, any>): CommandModule<any, any> {
+  return {
+    ...command,
+    handler: async (argv) => {
+      const operation = async () => { await command.handler(argv); };
+      if (argv.local) {
+        await operation();
+      } else {
+        await withGitUpdates(process.cwd(), operation);
+      }
+    },
+  };
 }
 
 function withProjectOption<T>(yargs: Argv<T>): Argv<T & ProjectArgs> {
@@ -141,18 +164,19 @@ const rmCmd: CommandModule<any, any> = {
   },
 };
 
-interface TsArgs extends ProjectArgs {
+interface GenerateArgs extends ProjectArgs {
   path?: string;
   force: boolean;
 }
 
-const tsCmd: CommandModule<any, any> = {
-  command: "ts [path]",
+const generateCmd: CommandModule<any, any> = {
+  command: "generate [path]",
+  aliases: ["gen"],
   describe:
     "Generate a Zod-validated env.ts from the .env schema in ts values mode",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      yargs
+      withLocalOption(yargs)
         .positional("path", {
           type: "string",
           description: "Output path for generated file (default: src/env.ts)",
@@ -163,12 +187,23 @@ const tsCmd: CommandModule<any, any> = {
           default: false,
           description: "Overwrite ts path stored in .env",
         })
-    ) as Argv<TsArgs>,
+    ) as Argv<GenerateArgs>,
   handler: async (argv) => {
-    const args = argv as unknown as TsArgs;
-    await tsCommand(createContext(resolveProject(args.project)), args.path, {
+    const args = argv as unknown as GenerateArgs;
+    await generateCommand(createContext(resolveProject(args.project)), args.path, {
       force: args.force,
     });
+  },
+};
+
+const tsCmd: CommandModule<any, any> = {
+  ...generateCmd,
+  command: 'ts [path]',
+  aliases: [],
+  describe: 'Deprecated alias for generate (gen)',
+  handler: async (argv) => {
+    console.warn('Warning: env-manager ts is deprecated. Use env-manager generate (gen) instead.');
+    await generateCmd.handler(argv);
   },
 };
 
@@ -184,7 +219,7 @@ const initCmd: CommandModule<any, any> = {
     "Initialize .env from AWS if it exists, otherwise create a new template",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      yargs
+      withLocalOption(yargs)
         .option("yes", {
           alias: "y",
           type: "boolean",
@@ -205,9 +240,10 @@ const initCmd: CommandModule<any, any> = {
     const args = argv as unknown as InitArgs;
     const project = resolveProject(args.project);
     validateProjectName(project, 'init');
-    await checkAwsCredentials();
+    if (!args.local) await checkAwsCredentials();
     await initCommand(createContext(project), {
       assumeYes: args.yes,
+      local: args.local,
       valuesFormat: args.valuesFormat,
       valuesPath: args.valuesPath,
     });
@@ -224,7 +260,7 @@ const setCmd: CommandModule<any, any> = {
   describe: 'Set project config stored in .env',
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      yargs
+      withLocalOption(yargs)
         .positional('field', {
           type: 'string',
           description: 'Config field: values.format or values.path',
@@ -293,11 +329,11 @@ interface EnvNameArgs extends ProjectArgs {
   environment?: string;
 }
 
-const envSetCmd: CommandModule<any, any> = {
+const envSetCmd: CommandModule<any, any> = withGitHandler({
   command: 'set <environment>',
   describe: 'Set the default environment stored in .env.local',
   builder: (yargs: Argv<Record<string, never>>) =>
-    yargs.positional('environment', {
+    withLocalOption(yargs).positional('environment', {
       type: 'string',
       description: 'Environment name',
     }) as unknown as Argv<EnvNameArgs>,
@@ -310,7 +346,7 @@ const envSetCmd: CommandModule<any, any> = {
     validateProjectName(project, 'env');
     await envSetCommand(createContext(project), args.environment);
   },
-};
+});
 
 const envListCmd: CommandModule<any, any> = {
   command: 'list',
@@ -649,6 +685,7 @@ async function run() {
     upCmd,
     downCmd,
     rmCmd,
+    generateCmd,
     tsCmd,
     initCmd,
     listCmd,
@@ -663,7 +700,7 @@ async function run() {
     .usage(
       '$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync.'
     )
-    .command(rootCommands as Array<CommandModule<{}, any>>)
+    .command(rootCommands.map(withGitHandler) as Array<CommandModule<{}, any>>)
     .demandCommand(1, 'Please specify a command')
     .strict()
     .version(false)
@@ -673,7 +710,7 @@ async function run() {
     .parse();
 }
 
-withGitUpdates(process.cwd(), run).catch((e) => {
+run().catch((e) => {
   if (e instanceof EnvManagerError) {
     console.error(`Error: ${e.message}`);
   } else {

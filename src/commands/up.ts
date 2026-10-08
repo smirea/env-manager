@@ -27,7 +27,7 @@ import {
   resolveValuesOutputPath,
   writeValuesForConfig,
 } from "../values-config";
-import { updateConfiguredTsOutput } from "./ts";
+import { updateConfiguredTsOutput } from "./generate";
 
 export async function upCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;

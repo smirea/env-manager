@@ -29,6 +29,7 @@ const TEMPLATE = `# env-manager: {{PROJECT}} | {{DATE}}
 
 type InitOptions = {
   assumeYes?: boolean;
+  local?: boolean;
   valuesFormat?: string;
   valuesPath?: string;
 };
@@ -192,11 +193,11 @@ export async function initCommand(
   const envPath = `${ctx.cwd}/.env`;
   const envFile = Bun.file(envPath);
   const envAlreadyExists = await envFile.exists();
-  const aws = createAwsAdapter();
+  const aws = options.local ? null : createAwsAdapter();
   let envContent = envAlreadyExists ? await envFile.text() : "";
 
   if (!envAlreadyExists) {
-    const secret = await aws.getSecret(secretName(ctx.project));
+    const secret = await aws?.getSecret(secretName(ctx.project));
 
     if (secret) {
       const projectSecret = normalizeProjectSecret(secret);
@@ -276,6 +277,8 @@ export async function initCommand(
     valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
   });
   const localSchema = parseEnvFile(envContent).schema;
+
+  if (!aws) return;
 
   await copyGlobalDefaults({
     aws,

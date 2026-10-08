@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { tsCommand, updateConfiguredTsOutput } from './ts';
+import { generateCommand, updateConfiguredTsOutput } from './generate';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
@@ -16,12 +16,12 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 
 const ENV_CONTENT = `# env-manager: test-project | 2025-01-01T00:00:00Z\n\nFOO=bar # {optional string}\n`;
 
-describe('ts command', () => {
+describe('generate command', () => {
   test('does not emit zod defaults from .env values', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), ENV_CONTENT);
 
-      await tsCommand(
+      await generateCommand(
         { project: 'test-project', cwd: dir },
         path.join(dir, 'env.ts')
       );
@@ -46,7 +46,7 @@ describe('ts command', () => {
         ].join('\n')
       );
 
-      await tsCommand(
+      await generateCommand(
         { project: 'test-project', cwd: dir },
         path.join(dir, 'env.ts')
       );
@@ -72,7 +72,7 @@ describe('ts command', () => {
       await writeFile(path.join(dir, '.env'), ENV_CONTENT);
       const outPath = path.join(dir, 'env.ts');
 
-      await tsCommand({ project: 'test-project', cwd: dir }, outPath);
+      await generateCommand({ project: 'test-project', cwd: dir }, outPath);
 
       const envAfter = await readFile(path.join(dir, '.env'), 'utf8');
       expect(envAfter).toContain(`# env-manager ts: ${outPath}`);
@@ -84,7 +84,7 @@ describe('ts command', () => {
       await writeFile(path.join(dir, '.env'), ENV_CONTENT);
       const outPath = path.join(dir, 'env.ts');
 
-      await tsCommand({ project: 'test-project', cwd: dir }, outPath);
+      await generateCommand({ project: 'test-project', cwd: dir }, outPath);
 
       const envAfter = await readFile(path.join(dir, '.env'), 'utf8');
       const lines = envAfter.split('\n');
@@ -103,7 +103,7 @@ describe('ts command', () => {
       const { mkdir } = await import('node:fs/promises');
       await mkdir(path.join(dir, 'custom'), { recursive: true });
 
-      await tsCommand({ project: 'test-project', cwd: dir });
+      await generateCommand({ project: 'test-project', cwd: dir });
 
       const output = await readFile(outPath, 'utf8');
       expect(output).toContain('FOO: z.string(),');
@@ -118,7 +118,7 @@ describe('ts command', () => {
       );
 
       expect(
-        tsCommand({ project: 'test-project', cwd: dir }, 'new.ts')
+        generateCommand({ project: 'test-project', cwd: dir }, 'new.ts')
       ).rejects.toThrow('Pass --force to overwrite');
     });
   });
@@ -131,7 +131,7 @@ describe('ts command', () => {
       );
       const newPath = path.join(dir, 'new.ts');
 
-      await tsCommand({ project: 'test-project', cwd: dir }, newPath, {
+      await generateCommand({ project: 'test-project', cwd: dir }, newPath, {
         force: true,
       });
 
@@ -181,7 +181,7 @@ describe('ts command', () => {
       );
 
       await expect(
-        tsCommand({ project: 'test-project', cwd: dir })
+        generateCommand({ project: 'test-project', cwd: dir })
       ).rejects.toThrow('only works when values.format is "ts"');
     });
   });
