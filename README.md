@@ -1,6 +1,7 @@
 # env-manager
 
-CLI tool for managing environment variables with schema validation and AWS Secrets Manager sync.
+Keep environment schemas in one `.env`, generate local values and typed access,
+and optionally sync with AWS Secrets Manager.
 
 ## Installation
 
@@ -15,6 +16,51 @@ bun link
 env-manager <command> [options]
 ```
 
+### Ordinary projects
+
+Most projects only need one schema file. No targets or section headers are needed:
+
+```bash
+# .env
+# env-manager: my-app
+# env-manager local:true
+
+API_URL= # {url}
+API_KEY= # {string}
+PORT=3000 # {int:min(1),max(65535)}
+```
+
+```bash
+env-manager init --local
+# Add your schema entries, then:
+env-manager gen
+```
+
+With `package.json`, values default to `.env.local` and the TypeScript reader to
+`src/env.ts`. Fill in `.env.local` and load it in your app as usual. Generation
+creates missing values files with defaults and empty placeholders; existing
+single-project values files remain the source and are preserved. Readers contain
+validation code, never secret values or embedded defaults. Missing required
+values fail validation when syncing or using the reader, so you can generate
+while setting up a project.
+
+For Swift, set one format directive; the values destination defaults to
+`Config/LocalSecrets.xcconfig`:
+
+```bash
+# env-manager: my-ios-app
+# env-manager local:true
+# env-manager format: swift
+
+API_URL=https://example.com # {url}
+API_KEY= # {string}
+```
+
+```bash
+env-manager init --local --values-format swift
+env-manager generate
+```
+
 ### Commands
 
 | Command | Description |
@@ -23,12 +69,14 @@ env-manager <command> [options]
 | `up` | Upload `.env` schema and configured values for the current environment to AWS |
 | `down` | Download `.env` and configured values for the current environment from AWS |
 | `rm [project]` | Delete the project secret from AWS without touching local files |
-| `generate [path]` (`gen`) | Generate typed `env.ts` file in `ts` values mode (default: `src/env.ts`) |
+| `generate [path]` (`gen`) | Generate local values files and TypeScript readers; all targets by default |
 | `ts [path]` | Deprecated alias for `generate`; still accepts the same options |
 | `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
 | `print [project]` | Print all stored environments for a project |
 | `print [project] -e <env>` | Print one stored environment for a project |
-| `set <field> <value>` | Set project config in `.env` (`values.format`, `values.path`) |
+| `set <field> <value>` | Set `.env` config: `local`, `format`, `path`, or `generate` |
+| `check [--strict]` | Validate root config and output paths without changing files |
+| `format` | Normalize spacing while preserving comments, values, variable order, and target scopes |
 | `env set <env>` | Set the default environment marker |
 | `env list` (`env ls`) | List environments for a project |
 | `env rm <env>` | Remove an environment from AWS |
@@ -50,17 +98,20 @@ or committed. Unchanged writes do not create commits or change staging.
 This applies within the current Git repository; commands outside Git still work.
 Automatic commits stay local and are not pushed. Pass `--local` to supported
 commands to leave changes unstaged and uncommitted (existing staging is preserved).
+The persistent `# env-manager local:true` setting also disables all Git updates.
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `-p, --project <name>` | Project name (default: `.env` header, then current directory name) |
-| `--local` | Skip secret storage and automatic Git updates (`init`, `generate`/`gen`/`ts`, `set`, `env set`) |
+| `--local` / `--no-local` | Override project local mode for this invocation |
+| `--target <name>` | Generate only one declared target (`generate` and aliases) |
+| `--strict` | Require type annotations in legacy files too (`check`) |
 | `-f, --force` | Replace the stored TypeScript output path (`generate` only, including aliases) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
 | `--values-format <ts\|swift>` | Values output format (`init` only) |
-| `--values-path <path>` | Values output path (`init` only) |
+| `--values-path <path>` | Values output path (`init` only; otherwise the format default) |
 | `-e, --env <name>` | Print only one environment (`print` only) |
 | `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
 | `--credit <usd>` | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`) |
@@ -68,37 +119,140 @@ commands to leave changes unstaged and uncommitted (existing staging is preserve
 | `--expiration <utc-iso>` | OpenRouter key expiration (UTC ISO-8601, `new-key OPENROUTER_API_KEY` only) |
 | `-h, --help` | Show help message |
 
-### Try it locally
-
-No AWS credentials are needed for this workflow:
+### Local mode
 
 ```bash
-env-manager init --local
-# Add schema entries to .env, then generate typed access
-env-manager gen --local
-
-# Adjust local configuration without automatic commits
-env-manager set values.format ts --local
-env-manager set values.path .env.development --local
-env-manager env set development --local
+env-manager init --local        # persists local:true in .env
+env-manager gen                 # uses the stored setting
+env-manager check
+env-manager format
+env-manager set local false     # turn off the persistent setting
+env-manager up --no-local       # explicitly allow AWS for one invocation
 ```
 
-`init --local` creates a template or uses the existing `.env`, skips downloading
-project secrets and copying global defaults, and supports `--values-format` and
-`--values-path` as usual. For a directory without `package.json`, provide both
-values options explicitly, for example:
+Precedence: explicit `--local`/`--no-local`, then the root `.env` directive, then
+normal command behavior. Flags on commands other than `init` are temporary.
+`local` accepts only `true` or `false` and applies to the whole project wherever
+it appears in `.env`.
+
+Local mode skips secret storage and all automatic Git staging/commits.
+`init` creates or configures local files and skips remote project lookup and global
+defaults. `generate`/`gen`/deprecated `ts`, `set`, `env set`, `check`, `format`, and
+`new-key --list` work locally. Storage commands (`up`, `down`, `rm`, `print`,
+`list`, `env list`, `env rm`, `global`, and API key creation) fail before credentials,
+network calls, or file changes. Pass `--no-local` to permit storage for that run.
+The `# env-manager env: local` environment selector is separate from storage mode.
+
+## Monorepos
+
+Define every variable once in the root `.env`. Each target is a directory relative
+to that file, with its format and optional output paths on one line:
 
 ```bash
-env-manager init --local --values-format swift --values-path Config/LocalSecrets.xcconfig
+# env-manager: my-monorepo
+# env-manager local:true
+# env-manager target: ios format=swift
+# env-manager target: client format=ts
+# env-manager target: server format=ts path=config/.env.local
+
+# env-manager targets: ios,client,server
+API_URL= # {url}
+APP_NAME= # {string}
+
+# env-manager targets: client
+CLIENT_SETTING= # {optional string}
+
+# env-manager targets: server
+DATABASE_URL= # {url}
+AUTH_SECRET= # {string}
 ```
 
-`generate` always reads the local schema; `--local` also disables Git updates.
-It still generates TypeScript only, requires `values.format=ts`, and keeps the
-existing `# env-manager ts: <path>` setting for compatibility. `ts` forwards to
-`generate` and prints a deprecation warning. These commands continue to use their
-normal behavior when `--local` is omitted. Commands that operate on remote secrets
-(`up`, `down`, `rm`, `list`, `print`, `env list`, `env rm`, `global`, `new-key`)
-do not accept `--local`; `new-key --list` already works without AWS.
+Selection headers replace the previous scope and apply until the next header.
+`# env-manager targets: *` selects every declared target. Variables before the
+first selection are invalid. Every target must appear in at least one selection;
+an empty section counts. There are no nested configuration files or implicit
+broadcasts.
+
+Target fields:
+
+| Field | Meaning |
+|-------|---------|
+| `format=ts\|swift` | Required output format |
+| `path=<relative-file>` | Values file, default `.env.local` for TS or `Config/LocalSecrets.xcconfig` for Swift |
+| `generate=<relative-file>` | TypeScript reader, default `src/env.ts`; invalid for Swift |
+
+Paths are relative to the target directory. For example:
+
+```bash
+# env-manager target: client format=ts path=.env.local generate=src/config/env.ts
+```
+
+### Root values and generated children
+
+The root `.env.local` is the single values source for the current environment.
+It uses dotenv syntax, even when every target is Swift. Edit values there; do not
+use generated child values as input. Schema defaults apply when root values are
+missing. `generate` creates the source if it does not exist and otherwise preserves
+it. The root schema and one root values/files payload per environment are what
+`up` and `down` synchronize with AWS.
+
+```bash
+env-manager gen                 # materialize all targets
+env-manager gen --target client # only this target; still validate the whole plan
+env-manager env set staging     # selects the root environment
+env-manager down --no-local     # fetch root values, regenerate child outputs
+```
+
+Git-ignore the root `.env.local` and generated target values files. Readers can
+be committed. Child values include only selected variables; readers include
+only their schema and never contain secret values.
+
+Every child output identifies its owner with metadata (use `//` comments in
+TypeScript and xcconfig):
+
+```bash
+# env-manager: my-monorepo | 2026-01-01T00:00:00Z
+# env-manager target: client
+# env-manager root: ..
+# env-manager env: staging
+```
+
+The root pointer is relative to the output file's directory. These are ownership
+headers, not declarations. Commands from child directories find the owning root
+through that pointer or by walking to the root `.env`. Broken or mismatched
+ownership fails rather than turning the child into a new project.
+
+## Validation and formatting
+
+`check` is read-only. `format` normalizes directive and annotation spacing without
+reordering variables or selections, changing values, or removing ordinary comments.
+It refuses invalid configuration rather than guessing repairs. Schema-consuming
+commands validate configuration before writing. Generation preflights every target
+before writing any output, including with `--target`.
+
+Errors report the source file and line. Checks reject unknown or malformed
+metadata, invalid types and validators, invalid defaults, duplicate variables or
+settings, duplicate targets and selections, unknown targets, unused targets,
+untyped variables in the new format, and mixing target declarations with
+single-project output settings. Paths must be relative and stay inside their
+output directory, including through symlinks. Outputs cannot be directories,
+collide, overwrite the root schema/values source, or replace managed files owned
+by another project or target.
+
+### Compatibility
+
+Files without target declarations retain single-project behavior. Dated project
+headers, `values.format`, `values.path`, and `# env-manager ts: <reader-path>` remain
+supported. New `format`, `path`, and `generate` names replace their legacy
+counterparts; declaring both is an error. `generate [path]` preserves the existing
+positional reader-path argument, and `--force` is still required to change a
+configured path. In monorepos, use `--target <name>` with a positional path.
+
+`ts` forwards to `generate` and prints a deprecation warning. Existing stored
+`ts` paths still work. Configured output paths must now be relative; move any
+absolute output paths inside the project. Introducing `format`, `path`, `generate`,
+or target declarations opts into typed-variable checks. `local:true` alone does
+not: use `check --strict` to find untyped variables in a legacy file.
 
 ## Schema Format
 
@@ -136,38 +290,29 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
 ## Values Output
 
-The values output is configured in `.env`:
+Single-project output settings are optional when `package.json` supplies the TS
+defaults. Use `format: swift` to select Swift, and `path` or `generate` to override
+format defaults:
 
 ```bash
-# env-manager values.format: ts
-# env-manager values.path: .env.local
+# env-manager format: ts
+# env-manager path: .env.local
+# env-manager generate: src/config/env.ts
 ```
-
-Supported formats:
-
-| Format | Output |
-|--------|--------|
-| `ts` | dotenv-style values with env-manager metadata, normally `.env.local` |
-| `swift` | Xcode `.xcconfig` values like `API_KEY = secret` |
-
-If the values config is missing and `package.json` exists, env-manager assumes
-the legacy TypeScript behavior: `values.format=ts` and `values.path=.env.local`.
-Without config or `package.json`, commands that read or write values fail.
-
-For Swift/Xcode projects:
 
 ```bash
-env-manager init --values-format swift --values-path Config/LocalSecrets.xcconfig
+env-manager set format swift
+env-manager set path Config/LocalSecrets.xcconfig
 ```
 
-To update config later:
+Swift generation encodes `//` as `/$()/` so URLs survive xcconfig comment parsing;
+reading Swift values decodes that representation. This behavior is verified with
+Xcode build settings. [Apple xcconfig syntax](https://help.apple.com/xcode/mac/current/en.lproj/dev745c5c974.html)
+describes comment delimiters and setting expansion.
 
-```bash
-env-manager set values.format swift
-env-manager set values.path Config/LocalSecrets.xcconfig
-```
-
-`env-manager generate` only runs when `values.format` is `ts`.
+`generate` produces a reader for TS and values only for Swift. A positional
+reader path is valid only with TS. Without config or `package.json`, configure a
+format before commands that read or write values.
 
 ## Environments
 

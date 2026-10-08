@@ -1,3 +1,4 @@
+import { parseRootConfig, defaultValuesPath } from './config';
 import { writeManagedFile } from './git-updates';
 import { mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -32,33 +33,22 @@ export const VALUES_CONFIG_FIELDS: ValuesConfigField[] = [
 ];
 
 export function parseValuesConfig(content: string): Partial<ValuesConfig> {
-  const config: Partial<ValuesConfig> = {};
-
-  for (const line of content.split('\n')) {
-    const formatMatch = line.match(
-      /^#\s*env-manager values\.format:\s*(.*?)\s*$/
-    );
-    if (formatMatch) {
-      config.format = normalizeValuesFormat(formatMatch[1]);
-      continue;
-    }
-
-    const pathMatch = line.match(
-      /^#\s*env-manager values\.path:\s*(.*?)\s*$/
-    );
-    if (pathMatch) {
-      config.path = normalizeValuesPath(pathMatch[1]);
-    }
-  }
-
-  return config;
+  const config = parseRootConfig(content);
+  return { ...(config.format ? { format: config.format } : {}), ...(config.path ? { path: config.path } : {}) };
 }
 
 export async function resolveValuesConfig(
   ctx: CommandContext,
   envContent: string
 ): Promise<ValuesConfig> {
-  const config = parseValuesConfig(envContent);
+  const root = parseRootConfig(envContent, join(ctx.cwd, '.env'));
+  if (root.targets.length) return { format: 'ts', path: '.env.local' };
+  const config = { format: root.format, path: root.path };
+  if (root.modern) {
+    const format = config.format ?? (await Bun.file(join(ctx.cwd, 'package.json')).exists() ? 'ts' : undefined);
+    if (!format) throw new EnvManagerError(`${ctx.cwd}/.env:1: Set format: ts or format: swift.`);
+    return { format, path: config.path ?? defaultValuesPath(format) };
+  }
 
   if (config.format && config.path) {
     return {
@@ -209,7 +199,7 @@ export function generateSwiftValuesContent(
     if (!Object.prototype.hasOwnProperty.call(values, entry.name)) {
       continue;
     }
-    lines.push(`${entry.name} = ${values[entry.name]}`);
+    lines.push(`${entry.name} = ${values[entry.name].replaceAll('//', '/$()/')}`);
     emitted.add(entry.name);
   }
 
@@ -217,7 +207,7 @@ export function generateSwiftValuesContent(
     if (emitted.has(name) || schemaNames.has(name)) {
       continue;
     }
-    lines.push(`${name} = ${value}`);
+    lines.push(`${name} = ${value.replaceAll('//', '/$()/')}`);
   }
 
   return lines.length === 0 ? '' : `${lines.join('\n')}\n`;
@@ -241,7 +231,7 @@ export function parseSwiftValues(content: string): EnvValues {
       continue;
     }
 
-    values[match[1]] = stripSwiftInlineComment(match[2]).trim();
+    values[match[1]] = stripSwiftInlineComment(match[2]).trim().replaceAll('/$()/', '//');
   }
 
   return values;

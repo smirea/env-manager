@@ -1,3 +1,5 @@
+import { parseRootConfig, configError } from '../config';
+import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
@@ -277,12 +279,16 @@ export async function newKeyCommand(
   });
 
   const existsInSchema = parsed.schema.some((s) => s.name === keyName);
+  if (!existsInSchema && parseRootConfig(envContent, envPath).targets.length) {
+    configError(envPath, 1, `Declare ${keyName} in a target selection before creating a key in a monorepo.`);
+  }
   if (!existsInSchema) {
     console.log(`Adding ${keyName} to .env schema...`);
     envContent = appendSchemaEntry(envContent, keyName, keyDef.schemaType);
     envContentChanged = true;
   }
 
+  await planGeneration(ctx, envContent);
   const aws = createAwsAdapter();
   const projectSecret = await aws.getSecret(secretName(ctx.project));
   const existingProject = projectSecret
@@ -398,6 +404,8 @@ export async function newKeyCommand(
       }
     );
   }
+
+  await updateConfiguredTsOutput(ctx, envContent);
 
   if (!globalValue || key !== globalValue) {
     await saveToGlobal(aws, keyName, key, keyDef.schemaType, ctx.project);

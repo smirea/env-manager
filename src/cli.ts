@@ -1,5 +1,10 @@
 #!/usr/bin/env bun
 
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { parseRootConfig, formatRootConfig } from './config';
+import { resolveProjectRoot } from './project-root';
+import { withGitUpdates, writeManagedFile } from './git-updates';
 import yargs, { type Argv, type CommandModule } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { checkAwsCredentials } from './aws';
@@ -21,10 +26,9 @@ import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
 import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
-import { generateCommand } from './commands/generate';
+import { generateCommand, planGeneration } from './commands/generate';
 import { upCommand } from './commands/up';
 import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
-import { withGitUpdates } from './git-updates';
 import { resolveProjectName } from './project-name';
 import type { CommandContext } from './types';
 import { EnvManagerError } from './types';
@@ -52,24 +56,36 @@ interface ProjectArgs {
   local?: boolean;
 }
 
-function withLocalOption<T>(yargs: Argv<T>): Argv<T & { local: boolean }> {
+function withLocalOption<T>(yargs: Argv<T>): Argv<T & { local: boolean | undefined }> {
   return yargs.option("local", {
     type: "boolean",
-    default: false,
-    description: "Use local files only, without secret storage or Git updates",
+    description: "Use local files only; --no-local overrides the .env setting",
   });
 }
 
-function withGitHandler(command: CommandModule<any, any>): CommandModule<any, any> {
+function withCommandContext(command: CommandModule<any, any>): CommandModule<any, any> {
   return {
     ...command,
     handler: async (argv) => {
-      const operation = async () => { await command.handler(argv); };
-      if (argv.local) {
-        await operation();
-      } else {
-        await withGitUpdates(process.cwd(), operation);
+      const content = await readFile(join(process.cwd(), '.env'), 'utf8').catch((error) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
+      const config = content !== undefined ? parseRootConfig(content, join(process.cwd(), '.env'), argv.strict === true) : undefined;
+      const commandName = argv._.map(String).join(' ');
+      const enablingLocal = commandName === 'set' && argv.field === 'local' && argv.value === 'true';
+      const local = argv.local ?? (enablingLocal || config?.local === true);
+      const localCommands = ['init', 'generate', 'gen', 'ts', 'set', 'env set', 'check', 'format'];
+      const catalog = commandName === 'new-key' && argv.list;
+      if (local && !localCommands.includes(commandName) && !catalog && commandName !== 'env') {
+        throw new EnvManagerError(`${commandName} requires secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.`);
       }
+      if (content !== undefined && ['check', 'format', 'up', 'down', 'new-key', 'env set'].includes(commandName) && !catalog) {
+        await planGeneration(createContext(resolveProject(argv.project)), content);
+      }
+      const operation = async () => { await command.handler({ ...argv, local }); };
+      if (local || commandName === 'check' || catalog) await operation();
+      else await withGitUpdates(process.cwd(), operation);
     },
   };
 }
@@ -167,6 +183,7 @@ const rmCmd: CommandModule<any, any> = {
 interface GenerateArgs extends ProjectArgs {
   path?: string;
   force: boolean;
+  target?: string;
 }
 
 const generateCmd: CommandModule<any, any> = {
@@ -176,10 +193,14 @@ const generateCmd: CommandModule<any, any> = {
     "Generate a Zod-validated env.ts from the .env schema in ts values mode",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      withLocalOption(yargs)
+      yargs
         .positional("path", {
           type: "string",
           description: "Output path for generated file (default: src/env.ts)",
+        })
+        .option('target', {
+          type: 'string',
+          description: 'Generate only one declared target',
         })
         .option("force", {
           alias: "f",
@@ -192,6 +213,7 @@ const generateCmd: CommandModule<any, any> = {
     const args = argv as unknown as GenerateArgs;
     await generateCommand(createContext(resolveProject(args.project)), args.path, {
       force: args.force,
+      target: args.target,
     });
   },
 };
@@ -219,7 +241,7 @@ const initCmd: CommandModule<any, any> = {
     "Initialize .env from AWS if it exists, otherwise create a new template",
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      withLocalOption(yargs)
+      yargs
         .option("yes", {
           alias: "y",
           type: "boolean",
@@ -260,10 +282,10 @@ const setCmd: CommandModule<any, any> = {
   describe: 'Set project config stored in .env',
   builder: (yargs: Argv<Record<string, never>>) =>
     withProjectOption(
-      withLocalOption(yargs)
+      yargs
         .positional('field', {
           type: 'string',
-          description: 'Config field: values.format or values.path',
+          description: 'Config field: local, format, path, generate (legacy values.format/values.path also work)',
         })
         .positional('value', {
           type: 'string',
@@ -329,11 +351,11 @@ interface EnvNameArgs extends ProjectArgs {
   environment?: string;
 }
 
-const envSetCmd: CommandModule<any, any> = withGitHandler({
+const envSetCmd: CommandModule<any, any> = withCommandContext({
   command: 'set <environment>',
   describe: 'Set the default environment stored in .env.local',
   builder: (yargs: Argv<Record<string, never>>) =>
-    withLocalOption(yargs).positional('environment', {
+    yargs.positional('environment', {
       type: 'string',
       description: 'Environment name',
     }) as unknown as Argv<EnvNameArgs>,
@@ -348,7 +370,7 @@ const envSetCmd: CommandModule<any, any> = withGitHandler({
   },
 });
 
-const envListCmd: CommandModule<any, any> = {
+const envListCmd: CommandModule<any, any> = withCommandContext({
   command: 'list',
   aliases: ['ls'],
   describe: 'List environments stored for a project',
@@ -359,9 +381,9 @@ const envListCmd: CommandModule<any, any> = {
     await checkAwsCredentials();
     await envListCommand(createContext(project));
   },
-};
+});
 
-const envRmCmd: CommandModule<any, any> = {
+const envRmCmd: CommandModule<any, any> = withCommandContext({
   command: 'rm <environment>',
   describe: 'Remove an environment from AWS',
   builder: (yargs: Argv<Record<string, never>>) =>
@@ -379,7 +401,7 @@ const envRmCmd: CommandModule<any, any> = {
     await checkAwsCredentials();
     await envRmCommand(createContext(project), args.environment);
   },
-};
+});
 
 const envCmd: CommandModule<any, any> = {
   command: 'env',
@@ -494,7 +516,7 @@ function parseGlobalSetInput(argv: GlobalSetArgs): {
   return { name, value, location };
 }
 
-const globalSetCmd: CommandModule<any, any> = {
+const globalSetCmd: CommandModule<any, any> = withCommandContext({
   command: "set [name] [value] [location]",
   describe: "Set a global default env var",
   builder: (yargs: Argv<Record<string, never>>) =>
@@ -531,9 +553,9 @@ const globalSetCmd: CommandModule<any, any> = {
     const input = parseGlobalSetInput(argv as GlobalSetArgs);
     await globalSetCommand(createContext('default'), input);
   },
-};
+});
 
-const globalGetCmd: CommandModule<any, any> = {
+const globalGetCmd: CommandModule<any, any> = withCommandContext({
   command: "get [name]",
   describe: "Get a global default env var",
   builder: (yargs: Argv<Record<string, never>>) =>
@@ -545,10 +567,10 @@ const globalGetCmd: CommandModule<any, any> = {
     await checkAwsCredentials();
     await globalGetCommand(createContext('default'), argv.name);
   },
-};
+});
 
 const globalListCmd: CommandModule<any, any> =
-  {
+  withCommandContext({
     command: "list",
     aliases: ["ls"],
     describe: "List global default env vars",
@@ -556,13 +578,13 @@ const globalListCmd: CommandModule<any, any> =
       await checkAwsCredentials();
       await globalListCommand(createContext('default'));
     },
-  };
+  });
 
 interface GlobalRmArgs {
   name?: string;
 }
 
-const globalRmCmd: CommandModule<any, any> = {
+const globalRmCmd: CommandModule<any, any> = withCommandContext({
   command: "rm [name]",
   describe: "Remove a global default env var",
   builder: (yargs: Argv<Record<string, never>>) =>
@@ -584,7 +606,7 @@ const globalRmCmd: CommandModule<any, any> = {
     await checkAwsCredentials();
     await globalRmCommand(createContext("default"), argv.name);
   },
-};
+});
 
 const globalCmd: CommandModule<any, any> = {
   command: "global",
@@ -679,9 +701,40 @@ const newKeyCmd: CommandModule<any, any> = {
   },
 };
 
+const checkCmd: CommandModule<any, any> = {
+  command: 'check',
+  describe: 'Validate configuration and output paths without changing files',
+  builder: (yargs: Argv<Record<string, never>>) => withProjectOption(yargs.option('strict', {
+    type: 'boolean', default: false, description: 'Require type annotations for legacy variables too',
+  })),
+  handler: async (argv) => {
+    const file = join(process.cwd(), '.env');
+    const content = await Bun.file(file).text();
+    parseRootConfig(content, file, argv.strict);
+    await planGeneration(createContext(resolveProject(argv.project)), content);
+    console.log('Configuration is valid.');
+  },
+};
+
+const formatCmd: CommandModule<any, any> = {
+  command: 'format',
+  describe: 'Normalize .env formatting while preserving comments, values, order, and scopes',
+  builder: (yargs: Argv<Record<string, never>>) => withProjectOption(yargs),
+  handler: async () => {
+    const file = join(process.cwd(), '.env');
+    const content = await Bun.file(file).text();
+    const formatted = formatRootConfig(content, file);
+    if (formatted !== content) await writeManagedFile(file, formatted);
+    console.log('Formatted .env');
+  },
+};
+
 async function run() {
+  process.chdir(resolveProjectRoot(process.cwd()));
   loadOwnEnvFromPaths(resolveOwnEnvPaths(import.meta.url));
   const rootCommands: Array<CommandModule<any, any>> = [
+    checkCmd,
+    formatCmd,
     upCmd,
     downCmd,
     rmCmd,
@@ -695,12 +748,12 @@ async function run() {
     globalCmd,
     newKeyCmd,
   ];
-  await yargs(hideBin(process.argv))
+  await withLocalOption(yargs(hideBin(process.argv)))
     .scriptName('env-manager')
     .usage(
       '$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync.'
     )
-    .command(rootCommands.map(withGitHandler) as Array<CommandModule<{}, any>>)
+    .command(rootCommands.map(withCommandContext) as Array<CommandModule<{}, any>>)
     .demandCommand(1, 'Please specify a command')
     .strict()
     .version(false)

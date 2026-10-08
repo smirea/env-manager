@@ -23,7 +23,7 @@ utility to manage my own environment variables for all my personal projects
 
 2. store projects in aws secrets manager (both schema and data) in namespace `env-manager/<project>`
 
-    values output is configured in `.env` with `# env-manager values.format: ts|swift` and `# env-manager values.path: <path>`. missing config falls back to `ts` + `.env.local` only when `package.json` exists.
+    single-project values output uses optional `# env-manager format: ts|swift`, `# env-manager path: <path>`, and `# env-manager generate: <reader path>`. TS defaults are `.env.local` and `src/env.ts` with `package.json`; Swift values default to `Config/LocalSecrets.xcconfig`. Legacy `values.format`, `values.path`, and `ts` metadata are still readable but cannot be duplicated with new names.
 
 3. cli script
 
@@ -31,7 +31,7 @@ utility to manage my own environment variables for all my personal projects
 
     3.2. `env-manager down [-p --project=<name>]` - syncs `.env` and configured values from aws, preserving the stored schema date and writing the stored value date in `ts` mode
 
-    3.3. `env-manager generate [path]` - generates typed env file in `ts` values mode (defaults to `src/env.ts`) with zod schema and `z.parse(process.env)`. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
+    3.3. `env-manager generate [path]` - materializes local values and TS readers (default `src/env.ts`). Swift produces values only. `--target <name>` selects one monorepo target. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
 
     3.4. `env-manager init [-p --project=<name>] [--values-format ts|swift --values-path <path>]` - creates `.env` from aws if project exists, otherwise creates empty template with header. `--local` skips AWS credentials, remote project lookup, global defaults, and automatic Git updates
 
@@ -41,11 +41,33 @@ utility to manage my own environment variables for all my personal projects
 
     3.7. `env-manager set <field> <value>` - sets `.env` config fields like `values.format` and `values.path`
 
-    `set` and `env set` also accept `--local` to preserve the Git index and skip automatic commits. Remote secret commands do not accept `--local`. The stored `# env-manager ts: <path>` setting remains compatible.
+    `# env-manager local:true` persists local mode. Explicit `--local`/`--no-local` overrides it for one invocation; `init --local` persists it. Local mode skips all AWS and Git updates. Storage commands fail before credentials; `--no-local` permits them. `set local true|false`, `check`, `format`, and `env set` work locally. The stored `# env-manager ts: <path>` remains compatible.
 
     flags:
     - `-p, --project <name>`: project name (defaults to `.env` header, then cwd basename)
     - `-y, --yes`: accept defaults for prompts (non-interactive)
+
+## Root configuration and targets
+
+Ordinary projects need no target sections. Monorepos use one-line declarations,
+for example `# env-manager target: client format=ts path=.env.local generate=src/env.ts`.
+Paths are relative to the target directory. Swift targets use `format=swift` and
+cannot declare `generate`. `# env-manager targets: client,server` selects a scope
+until replaced by the next selection; `targets: *` selects all. Every variable is
+defined once and every target selected at least once; empty sections are valid.
+
+Monorepos always use root `.env.local` as their values/environment source. Child
+files are generated subsets with project, target, environment, and a relative
+`root` ownership pointer. Child commands resolve the root. AWS stores one root
+schema and one values/files payload per environment.
+
+`check` validates config and all planned paths without writing. `check --strict`
+also requires types on legacy variables. New output settings or target declarations
+require types; `local` alone does not. `format` preserves values, comments, order,
+and scopes. Unknown metadata, duplicate settings/variables/targets/selections,
+invalid defaults or validators, unused/unknown targets, output collisions,
+symlink escapes, and foreign ownership are errors with file and line diagnostics.
+Preflight completes before generation writes any files.
 
 ## Key Providers
 

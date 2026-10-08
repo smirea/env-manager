@@ -23,7 +23,7 @@ describe('generate command', () => {
 
       await generateCommand(
         { project: 'test-project', cwd: dir },
-        path.join(dir, 'env.ts')
+        'env.ts'
       );
 
       const output = await readFile(path.join(dir, 'env.ts'), 'utf8');
@@ -48,7 +48,7 @@ describe('generate command', () => {
 
       await generateCommand(
         { project: 'test-project', cwd: dir },
-        path.join(dir, 'env.ts')
+        'env.ts'
       );
 
       const output = await readFile(path.join(dir, 'env.ts'), 'utf8');
@@ -70,7 +70,7 @@ describe('generate command', () => {
   test('stores ts path in .env after generation', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), ENV_CONTENT);
-      const outPath = path.join(dir, 'env.ts');
+      const outPath = 'env.ts';
 
       await generateCommand({ project: 'test-project', cwd: dir }, outPath);
 
@@ -82,7 +82,7 @@ describe('generate command', () => {
   test('ts path comment is inserted after the header line', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), ENV_CONTENT);
-      const outPath = path.join(dir, 'env.ts');
+      const outPath = 'env.ts';
 
       await generateCommand({ project: 'test-project', cwd: dir }, outPath);
 
@@ -95,7 +95,7 @@ describe('generate command', () => {
 
   test('uses stored ts path when no path argument given', async () => {
     await withTempDir(async (dir) => {
-      const outPath = path.join(dir, 'custom/env.ts');
+      const outPath = 'custom/env.ts';
       await writeFile(
         path.join(dir, '.env'),
         `# env-manager: test-project | 2025-01-01T00:00:00Z\n# env-manager ts: ${outPath}\n\nFOO=bar # {string}\n`
@@ -105,7 +105,7 @@ describe('generate command', () => {
 
       await generateCommand({ project: 'test-project', cwd: dir });
 
-      const output = await readFile(outPath, 'utf8');
+      const output = await readFile(path.join(dir, outPath), 'utf8');
       expect(output).toContain('FOO: z.string(),');
     });
   });
@@ -129,13 +129,13 @@ describe('generate command', () => {
         path.join(dir, '.env'),
         `# env-manager: test-project | 2025-01-01T00:00:00Z\n# env-manager ts: old.ts\n\nFOO=bar # {string}\n`
       );
-      const newPath = path.join(dir, 'new.ts');
+      const newPath = 'new.ts';
 
       await generateCommand({ project: 'test-project', cwd: dir }, newPath, {
         force: true,
       });
 
-      const output = await readFile(newPath, 'utf8');
+      const output = await readFile(path.join(dir, newPath), 'utf8');
       expect(output).toContain('FOO: z.string(),');
       const envAfter = await readFile(path.join(dir, '.env'), 'utf8');
       expect(envAfter).toContain(`# env-manager ts: ${newPath}`);
@@ -153,7 +153,7 @@ describe('generate command', () => {
           '# env-manager: test-project | 2025-01-01T00:00:00Z',
           '# env-manager ts: generated/env.ts',
           '',
-          'FOO=bar # {int}',
+          'FOO=3000 # {int}',
           '',
         ].join('\n')
       );
@@ -166,7 +166,7 @@ describe('generate command', () => {
     });
   });
 
-  test('rejects ts generation outside ts values mode', async () => {
+  test('rejects a reader path outside ts values mode', async () => {
     await withTempDir(async (dir) => {
       await writeFile(
         path.join(dir, '.env'),
@@ -181,7 +181,7 @@ describe('generate command', () => {
       );
 
       await expect(
-        generateCommand({ project: 'test-project', cwd: dir })
+        generateCommand({ project: 'test-project', cwd: dir }, 'env.ts')
       ).rejects.toThrow('only works when values.format is "ts"');
     });
   });

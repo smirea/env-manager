@@ -125,6 +125,13 @@ ${content}`)).toEqual({
     });
   });
 
+  test('escapes xcconfig comment delimiters in URLs and round-trips values', () => {
+    const content = generateSwiftValuesContent([], { API_URL: 'https://example.com', TOKEN: 'abc//def' });
+    expect(content).toContain('API_URL = https:/$()/example.com');
+    expect(content).toContain('TOKEN = abc/$()/def');
+    expect(parseSwiftValues(content)).toEqual({ API_URL: 'https://example.com', TOKEN: 'abc//def' });
+  });
+
   test('writes ts and swift values to their configured locations', async () => {
     await withTempDir(async (dir) => {
       const ctx: CommandContext = { project: 'demo', cwd: dir };

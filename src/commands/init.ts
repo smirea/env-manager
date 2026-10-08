@@ -1,3 +1,5 @@
+import { defaultValuesPath, parseRootConfig, upsertSetting } from '../config';
+import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
@@ -17,7 +19,6 @@ import {
   readValuesForConfig,
   resolveValuesConfig,
   type ValuesConfig,
-  upsertValuesConfig,
   writeValuesForConfig,
 } from "../values-config";
 
@@ -175,13 +176,10 @@ function getInitValuesConfig(options: InitOptions): ValuesConfig | null {
     return null;
   }
 
-  if (!options.valuesFormat || !options.valuesPath) {
-    throw new EnvManagerError(
-      'Use --values-format and --values-path together.'
-    );
-  }
-
-  return createValuesConfig(options.valuesFormat, options.valuesPath);
+  if (!options.valuesFormat) throw new EnvManagerError('Use --values-format with --values-path.');
+  const format = options.valuesFormat;
+  if (format !== 'ts' && format !== 'swift') throw new EnvManagerError('Values format must be ts or swift.');
+  return createValuesConfig(format, options.valuesPath ?? defaultValuesPath(format));
 }
 
 export async function initCommand(
@@ -201,9 +199,10 @@ export async function initCommand(
 
     if (secret) {
       const projectSecret = normalizeProjectSecret(secret);
-      const schemaContent = initValuesConfig
-        ? upsertValuesConfig(projectSecret.schema, initValuesConfig)
+      let schemaContent = initValuesConfig
+        ? upsertSetting(upsertSetting(projectSecret.schema, 'format', initValuesConfig.format), 'path', initValuesConfig.path)
         : projectSecret.schema;
+      await planGeneration(ctx, schemaContent);
       const valuesConfig = await resolveValuesConfig(ctx, schemaContent);
       const environment = await resolveEnvironment(ctx.cwd, {
         valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
@@ -237,21 +236,18 @@ export async function initCommand(
           syncDate: envPayload.syncDate,
         }
       );
+      await updateConfiguredTsOutput(ctx, schemaContent);
       console.log(
         `Downloaded .env from AWS for project "${ctx.project}" environment "${environment}"`
       );
       return;
     }
   } else {
-    const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
-    if (envContentWithoutEnvironment !== envContent) {
-      envContent = envContentWithoutEnvironment;
-      await writeManagedFile(envPath, envContent);
-    }
-    if (initValuesConfig) {
-      envContent = upsertValuesConfig(envContent, initValuesConfig);
-      await writeManagedFile(envPath, envContent);
-    }
+    envContent = removeEnvironmentFromContent(envContent);
+    if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
+    if (initValuesConfig) envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
+    await planGeneration(ctx, envContent);
+    if (envContent !== await envFile.text()) await writeManagedFile(envPath, envContent);
     console.log(`.env already exists at ${envPath}, skipping creation.`);
   }
 
@@ -266,9 +262,11 @@ export async function initCommand(
       now
     );
     if (initValuesConfig) {
-      envContent = upsertValuesConfig(envContent, initValuesConfig);
+      envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
     }
-    await resolveValuesConfig(ctx, envContent);
+    if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
+    parseRootConfig(envContent, envPath);
+    await planGeneration(ctx, envContent);
     await writeManagedFile(envPath, envContent);
     console.log(`Created new .env template for project "${ctx.project}"`);
   }

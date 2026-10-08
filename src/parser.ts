@@ -12,15 +12,15 @@ const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 const SYNC_DATE_PLACEHOLDER = "__env_manager_sync_date__";
 
 function formatHeaderLine(header: EnvFileHeader): string {
-  return `# env-manager: ${header.project} | ${header.syncDate}`;
+  return `# env-manager: ${header.project}${header.syncDate ? ` | ${header.syncDate}` : ""}`;
 }
 
 export function parseHeader(line: string): EnvFileHeader | null {
-  const match = line.match(/^#\s*env-manager:\s*([^\s|]+)\s*\|\s*(.+)$/);
+  const match = line.match(/^#\s*env-manager:\s*([^\s|]+)(?:\s*\|\s*(.+))?\s*$/);
   if (!match) return null;
   return {
     project: match[1].trim(),
-    syncDate: match[2].trim(),
+    syncDate: match[2]?.trim() ?? "",
   };
 }
 
@@ -37,23 +37,40 @@ export function parseValidators(
   if (!validatorStr.trim()) return [];
 
   const validators: Validator[] = [];
-  const pattern = /(min|max|format)\(([^)]+)\)/g;
-  let match;
-  let lastIndex = 0;
-
-  while ((match = pattern.exec(validatorStr)) !== null) {
-    const between = validatorStr.slice(lastIndex, match.index);
-    if (between.replace(/[,\s]/g, "") !== "") {
-      throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+  let remaining = validatorStr.trim();
+  while (remaining) {
+    const start = remaining.match(/^(min|max|format)\(/);
+    if (!start) throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    const kind = start[1];
+    const offset = start[0].length;
+    let end = offset;
+    if (kind === "format") {
+      if (remaining[offset] !== '/') throw new ParseError(`Invalid regex format: ${remaining}`);
+      let escaped = false;
+      let characterClass = false;
+      let closed = false;
+      for (end = offset + 1; end < remaining.length; end++) {
+        const char = remaining[end];
+        if (escaped) { escaped = false; continue; }
+        if (char === "\\") { escaped = true; continue; }
+        if (char === '[') characterClass = true;
+        if (char === ']') characterClass = false;
+        if (char === '/' && !characterClass) { closed = true; break; }
+      }
+      if (!closed) throw new ParseError(`Invalid regex format: ${remaining}`);
+      end++;
+      while (/[a-z]/i.test(remaining[end] ?? '') && end < remaining.length) end++;
+    } else {
+      end = remaining.indexOf(')', offset);
     }
-
-    const [, kind, value] = match;
+    if (end < offset || remaining[end] !== ')') throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    const value = remaining.slice(offset, end);
     if (kind === "min") {
       if (type !== "int" && type !== "float") {
         throw new ParseError(`min() is not valid for type ${type}`);
       }
-      const parsed = parseFloat(value);
-      if (Number.isNaN(parsed)) {
+      const parsed = Number(value);
+      if (!NUMERIC_VALUE_PATTERN.test(value.trim()) || !Number.isFinite(parsed)) {
         throw new ParseError(`Invalid min() value: ${value}`);
       }
       validators.push({ kind: "min", value: parsed });
@@ -61,8 +78,8 @@ export function parseValidators(
       if (type !== "int" && type !== "float") {
         throw new ParseError(`max() is not valid for type ${type}`);
       }
-      const parsed = parseFloat(value);
-      if (Number.isNaN(parsed)) {
+      const parsed = Number(value);
+      if (!NUMERIC_VALUE_PATTERN.test(value.trim()) || !Number.isFinite(parsed)) {
         throw new ParseError(`Invalid max() value: ${value}`);
       }
       validators.push({ kind: "max", value: parsed });
@@ -78,15 +95,12 @@ export function parseValidators(
         );
       }
     }
-    lastIndex = pattern.lastIndex;
-  }
-
-  const trailing = validatorStr.slice(lastIndex);
-  if (trailing.replace(/[,\s]/g, "") !== "") {
-    throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
-  }
-  if (validators.length === 0) {
-    throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    remaining = remaining.slice(end + 1).trim();
+    if (remaining) {
+      if (!remaining.startsWith(',')) throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+      remaining = remaining.slice(1).trim();
+      if (!remaining) throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    }
   }
 
   return validators;
@@ -151,7 +165,7 @@ function unescapeQuotedValue(value: string, quote: "'" | '"'): string {
   return result;
 }
 
-function findInlineCommentIndex(value: string): number {
+export function findInlineCommentIndex(value: string): number {
   let inSingle = false;
   let inDouble = false;
 
@@ -173,7 +187,7 @@ function findInlineCommentIndex(value: string): number {
   return -1;
 }
 
-function parseEnvLine(line: string): {
+export function parseEnvLine(line: string): {
   name: string;
   value: string | null;
   inlineComment: string | null;
@@ -219,7 +233,7 @@ export function parseEnvFile(content: string): ParsedEnvFile {
   } | null = null;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i].trimStart();
     const lineNumber = i + 1;
 
     if (headerSearchActive && !header) {
@@ -380,7 +394,7 @@ export function generateLocalEnvContent(
   return lines.join("\n") + "\n";
 }
 
-function formatSchemaComment(s: EnvVarSchema): string {
+export function formatSchemaComment(s: EnvVarSchema): string {
   let inner = "";
   if (s.optional) inner += "optional ";
   inner += s.type;

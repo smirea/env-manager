@@ -1,3 +1,4 @@
+import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
@@ -27,7 +28,6 @@ import {
   resolveValuesOutputPath,
   writeValuesForConfig,
 } from "../values-config";
-import { updateConfiguredTsOutput } from "./generate";
 
 export async function upCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
@@ -53,6 +53,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     parsed = parseEnvFile(envContent);
   }
 
+  await planGeneration(ctx, envContent);
   const aws = createAwsAdapter();
   const now = new Date().toISOString();
   const valuesConfig = await resolveValuesConfig(ctx, envContent);

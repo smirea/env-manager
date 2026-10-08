@@ -1,3 +1,4 @@
+import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import { resolveEnvironment } from "../environment";
@@ -11,7 +12,6 @@ import {
   resolveValuesConfig,
   writeValuesForConfig,
 } from "../values-config";
-import { updateConfiguredTsOutput } from "./generate";
 
 export async function downCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
@@ -26,6 +26,7 @@ export async function downCommand(ctx: CommandContext): Promise<void> {
   }
 
   const projectSecret = normalizeProjectSecret(secret);
+  await planGeneration(ctx, projectSecret.schema);
   const valuesConfig = await resolveValuesConfig(ctx, projectSecret.schema);
   const environment = await resolveEnvironment(ctx.cwd, {
     valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
