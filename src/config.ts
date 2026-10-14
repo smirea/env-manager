@@ -87,8 +87,10 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
       if (selection.includes('*') && selection.length !== 1) configError(file, line, '* must be the entire selection.');
       selections.push({ names: selection, line });
       metadata.set(line, `# env-manager targets: ${selection.join(',')}`);
+    } else if (field === 'env') {
+      configError(file, line, 'The env directive belongs in .env.local, not the tracked .env. Run any other env-manager command to move it.');
     } else {
-      if (!['local', 'format', 'path', 'generate', 'values.format', 'values.path', 'ts', 'env'].includes(field)) {
+      if (!['local', 'format', 'path', 'generate', 'values.format', 'values.path', 'ts'].includes(field)) {
         configError(file, line, `Unknown env-manager field "${field}".`);
       }
       const key = ({ 'values.format': 'format', 'values.path': 'path', ts: 'generate' } as Record<string, string>)[field] ?? field;
@@ -96,7 +98,6 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
       if (field === 'local' && value !== 'true' && value !== 'false') configError(file, line, 'local must be true or false.');
       if (key === 'format' && value !== 'ts' && value !== 'swift') configError(file, line, 'format must be ts or swift.');
       if (key === 'path' || key === 'generate') relativeOutput(value, file, line);
-      if (key === 'env' && !/^[^\s|]+$/.test(value)) configError(file, line, 'Invalid environment name.');
       settings.set(key, { value, line });
       metadata.set(line, `# env-manager ${field}: ${value}`);
     }

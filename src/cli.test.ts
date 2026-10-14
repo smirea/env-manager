@@ -101,6 +101,27 @@ describe('local CLI workflow', () => {
 });
 
 describe('persistent local and target workflows', () => {
+  test('moves a tracked env directive into the values file unless one is already set', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      await writeFile(join(cwd, 'package.json'), '{}\n');
+      const schema = '# env-manager: demo\n# env-manager env: staging\nPORT=3000 # {int}\n';
+      await writeFile(join(cwd, '.env'), schema);
+      await writeFile(join(cwd, '.gitignore'), '.env.local\n');
+      await initRepo(cwd);
+      expect(run(cwd, cli, 'check').stderr).toContain('belongs in .env.local');
+
+      expect(run(cwd, cli, 'gen').code).toBe(0);
+      expect(git(cwd, 'show', 'HEAD:.env')).not.toContain('env-manager env:');
+      expect(git(cwd, 'status', '--porcelain', '--untracked-files=no')).toBe('');
+      expect(await readFile(join(cwd, '.env.local'), 'utf8')).toBe('# env-manager env: staging\n');
+
+      await writeFile(join(cwd, '.env'), schema.replace('staging', 'prod'));
+      expect(run(cwd, cli, 'format', '--local').code).toBe(0);
+      expect(await readFile(join(cwd, '.env'), 'utf8')).not.toContain('env-manager env:');
+      expect(await readFile(join(cwd, '.env.local'), 'utf8')).toBe('# env-manager env: staging\n');
+    });
+  });
+
   test('persists init local mode, blocks storage commands before credentials, and respects explicit overrides', async () => {
     await withLocalCli(async (cwd, cli) => {
       await writeFile(join(cwd, 'package.json'), '{}\n');

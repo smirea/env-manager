@@ -3,7 +3,6 @@ import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
-  removeEnvironmentFromContent,
   resolveEnvironment,
 } from "../environment";
 import { writeFilesFromPayload } from "../file-sync";
@@ -243,7 +242,6 @@ export async function initCommand(
       return;
     }
   } else {
-    envContent = removeEnvironmentFromContent(envContent);
     if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
     if (initValuesConfig) envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
     await planGeneration(ctx, envContent);

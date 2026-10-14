@@ -3,7 +3,6 @@ import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
-  removeEnvironmentFromContent,
   resolveEnvironment,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
@@ -267,12 +266,6 @@ export async function newKeyCommand(
       `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
     );
   }
-  const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
-  if (envContentWithoutEnvironment !== envContent) {
-    envContent = envContentWithoutEnvironment;
-    envContentChanged = true;
-    parsed = parseEnvFile(envContent);
-  }
   const valuesConfig = await resolveValuesConfig(ctx, envContent);
   const environment = await resolveEnvironment(ctx.cwd, {
     valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
@@ -348,12 +341,11 @@ export async function newKeyCommand(
   const files = await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
 
   const now = new Date().toISOString();
-  const envContentForStorage = removeEnvironmentFromContent(envContent);
-  let schemaForPayload = existingProject?.schema ?? envContentForStorage;
+  let schemaForPayload = existingProject?.schema ?? envContent;
   const schemaChanged =
     !existingProject ||
     !envContentEqualIgnoringSyncDate(
-      envContentForStorage,
+      envContent,
       existingProject.schema
     );
   if (schemaChanged) {
@@ -362,7 +354,7 @@ export async function newKeyCommand(
       envContent = updatedEnvContent;
       envContentChanged = true;
     }
-    schemaForPayload = removeEnvironmentFromContent(envContent);
+    schemaForPayload = envContent;
   }
 
   const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");

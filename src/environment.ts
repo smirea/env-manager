@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { writeManagedFile } from './git-updates';
 import { EnvManagerError } from './types';
 
 export const DEFAULT_ENVIRONMENT = 'local';
@@ -27,14 +29,31 @@ export function parseEnvironmentComment(line: string): string | null {
   return environment;
 }
 
-export function resolveEnvironmentFromContent(content: string): string {
+export function findEnvironmentInContent(content: string): string | null {
   for (const line of content.split('\n')) {
     const environment = parseEnvironmentComment(line);
     if (environment) {
       return environment;
     }
   }
-  return DEFAULT_ENVIRONMENT;
+  return null;
+}
+
+export function resolveEnvironmentFromContent(content: string): string {
+  return findEnvironmentInContent(content) ?? DEFAULT_ENVIRONMENT;
+}
+
+// An existing env in the values file wins over the one being moved out of .env.
+export async function moveEnvironmentToValuesFile(
+  cwd: string,
+  valuesPath: string,
+  environment: string
+): Promise<void> {
+  const path = join(cwd, valuesPath);
+  const file = Bun.file(path);
+  const content = (await file.exists()) ? await file.text() : '';
+  if (findEnvironmentInContent(content)) return;
+  await writeManagedFile(path, upsertEnvironmentInContent(content, environment));
 }
 
 export async function resolveEnvironment(

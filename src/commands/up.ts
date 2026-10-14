@@ -2,7 +2,6 @@ import { planGeneration, updateConfiguredTsOutput } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
-  removeEnvironmentFromContent,
   resolveEnvironment,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
@@ -45,12 +44,6 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     throw new EnvManagerError(
       `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
     );
-  }
-  const envContentWithoutEnvironment = removeEnvironmentFromContent(envContent);
-  if (envContentWithoutEnvironment !== envContent) {
-    envContent = envContentWithoutEnvironment;
-    envContentChanged = true;
-    parsed = parseEnvFile(envContent);
   }
 
   await planGeneration(ctx, envContent);
@@ -96,12 +89,11 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   const files = await collectFilePayload(parsed.schema, values, ctx.cwd);
 
-  const envContentForStorage = removeEnvironmentFromContent(envContent);
-  let schemaForPayload = existingProject?.schema ?? envContentForStorage;
+  let schemaForPayload = existingProject?.schema ?? envContent;
   const schemaChanged =
     !existingProject ||
     !envContentEqualIgnoringSyncDate(
-      envContentForStorage,
+      envContent,
       existingProject.schema
     );
   if (schemaChanged) {
@@ -110,7 +102,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
       envContent = updatedEnvContent;
       envContentChanged = true;
     }
-    schemaForPayload = removeEnvironmentFromContent(envContent);
+    schemaForPayload = envContent;
   }
 
   const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseRootConfig, formatRootConfig } from './config';
 import { resolveProjectRoot } from './project-root';
+import { findEnvironmentInContent, moveEnvironmentToValuesFile, removeEnvironmentFromContent } from './environment';
 import { withGitUpdates, writeManagedFile } from './git-updates';
 import yargs, { type Argv, type CommandModule } from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -67,12 +68,15 @@ function withCommandContext(command: CommandModule<any, any>): CommandModule<any
   return {
     ...command,
     handler: async (argv) => {
-      const content = await readFile(join(process.cwd(), '.env'), 'utf8').catch((error) => {
+      const envPath = join(process.cwd(), '.env');
+      const original = await readFile(envPath, 'utf8').catch((error) => {
         if (error.code === 'ENOENT') return undefined;
         throw error;
       });
-      const config = content !== undefined ? parseRootConfig(content, join(process.cwd(), '.env'), argv.strict === true) : undefined;
       const commandName = argv._.map(String).join(' ');
+      const misplacedEnvironment = original !== undefined && commandName !== 'check' ? findEnvironmentInContent(original) : null;
+      const content = misplacedEnvironment ? removeEnvironmentFromContent(original!) : original;
+      const config = content !== undefined ? parseRootConfig(content, envPath, argv.strict === true) : undefined;
       const enablingLocal = commandName === 'set' && argv.field === 'local' && argv.value === 'true';
       const local = argv.local ?? (enablingLocal || config?.local === true);
       const localCommands = ['init', 'generate', 'gen', 'ts', 'set', 'env set', 'check', 'format'];
@@ -83,7 +87,15 @@ function withCommandContext(command: CommandModule<any, any>): CommandModule<any
       if (content !== undefined && ['check', 'format', 'up', 'down', 'new-key', 'env set'].includes(commandName) && !catalog) {
         await planGeneration(createContext(resolveProject(argv.project)), content);
       }
-      const operation = async () => { await command.handler({ ...argv, local }); };
+      const operation = async () => {
+        if (misplacedEnvironment) {
+          const valuesPath = config!.format !== 'swift' && config!.path && !config!.targets.length ? config!.path : '.env.local';
+          await moveEnvironmentToValuesFile(process.cwd(), valuesPath, misplacedEnvironment);
+          await writeManagedFile(envPath, content!);
+          console.log(`Moved env "${misplacedEnvironment}" from .env to ${valuesPath}`);
+        }
+        await command.handler({ ...argv, local });
+      };
       if (local || commandName === 'check' || catalog) await operation();
       else await withGitUpdates(process.cwd(), operation);
     },

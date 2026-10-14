@@ -319,6 +319,9 @@ format before commands that read or write values.
 Project values are grouped by environment. The current environment is stored in
 the configured `ts` values file, or in `.env.local` for non-`ts` values formats.
 If no environment comment exists, the current environment is `local`.
+It never belongs in the tracked `.env`: any command except `check` moves an
+environment comment found there into the values file, or drops it if the values
+file already has one. `check` reports it as an error.
 
 ```bash
 env-manager env set staging

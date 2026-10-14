@@ -3,7 +3,7 @@ import { dirname, join, relative } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { configError, parseRootConfig, relativeOutput, schemaForTarget, upsertSetting, type RootConfig } from '../config';
 import { preflightPaths, type OutputPath } from '../output-paths';
-import { removeEnvironmentFromContent, resolveEnvironment, upsertEnvironmentInContent } from '../environment';
+import { resolveEnvironment, upsertEnvironmentInContent } from '../environment';
 import { generateLocalEnvContent, parseHeader } from '../parser';
 import type { CommandContext, EnvVarSchema } from '../types';
 import { EnvManagerError } from '../types';
@@ -154,7 +154,7 @@ export async function generateCommand(
   const envPath = join(ctx.cwd, '.env');
   if (!(await Bun.file(envPath).exists())) throw new EnvManagerError(`.env not found at ${envPath}`);
   const original = await Bun.file(envPath).text();
-  let content = removeEnvironmentFromContent(original);
+  let content = original;
   const config = parseRootConfig(content, envPath);
   if (!config.targets.length) {
     if (options.target) configError(envPath, 1, '--target requires target declarations.');
