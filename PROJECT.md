@@ -29,7 +29,7 @@ utility to manage my own environment variables for all my personal projects
 
     3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and configured values. Skips the AWS write when nothing changed. defaults project to the `.env` header, then basename of cwd
 
-    3.2. `env-manager down [-p --project=<name>]` - syncs `.env` and configured values from aws; the values file is rewritten only when its values differ or its version is behind
+    3.2. `env-manager down [-p --project=<name>] [--env <name>]` - syncs `.env` and configured values from aws; with no recorded environment it requires `--env` unless only one exists; the values file is rewritten only when its values differ or its version is behind
 
     3.3. `env-manager generate [path]` - materializes local values and TS readers (default `src/env.ts`). Swift produces values only. `--target <name>` selects one monorepo target. Every values file and generated output has its own `| vN` header version, stored per environment in AWS and mirrored in the root values file; an output is rewritten only when its file version is lower, so formatter-only edits survive. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
 

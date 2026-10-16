@@ -67,7 +67,7 @@ env-manager generate
 |---------|-------------|
 | `init` | Create `.env` from AWS or new template and copy matching global defaults |
 | `up` | Upload `.env` schema and configured values for the current environment to AWS |
-| `down` | Download `.env` and configured values for the current environment from AWS |
+| `down [--env <name>]` | Download `.env` and configured values for the current (or given) environment from AWS |
 | `rm [project]` | Delete the project secret from AWS without touching local files |
 | `generate [path]` (`gen`) | Generate local values files and TypeScript readers; all targets by default |
 | `ts [path]` | Deprecated alias for `generate`; still accepts the same options |
@@ -340,7 +340,10 @@ env-manager env rm staging
 
 The next `env-manager up` creates or updates that environment in AWS.
 `env-manager down` downloads the current environment and fails if that
-environment has been removed remotely.
+environment has been removed remotely. `env-manager down --env prod` picks the
+environment explicitly and records it as the current one. With no recorded
+environment, `down` uses the only stored environment, and fails listing the
+available ones when there are several.
 
 ## Global Defaults
 

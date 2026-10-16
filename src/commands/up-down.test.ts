@@ -64,4 +64,66 @@ describe('output versions', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('down requires an explicit environment when several exist and none is recorded', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-env-'));
+    try {
+      const ctx = { project: 'multi', cwd: dir };
+      const schema = '# env-manager: multi\n\nFOO= # {string}\n';
+      secrets.set('env-manager/multi', {
+        schema,
+        environments: {
+          local: { values: 'FOO=local\n', syncDate: '2026-01-01T00:00:00Z' },
+          prod: { values: 'FOO=prod\n', syncDate: '2026-01-01T00:00:00Z' },
+        },
+      });
+      await writeFile(path.join(dir, 'package.json'), '{}\n');
+      await writeFile(path.join(dir, '.env'), schema);
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+
+      await expect(downCommand(ctx)).rejects.toThrow('No environment selected for "multi". Pass --env <name> or run "env-manager env set <name>". Available: local, prod');
+      expect(await Bun.file(path.join(dir, '.env.local')).exists()).toBe(false);
+      await expect(downCommand(ctx, { environment: 'staging' })).rejects.toThrow('Environment "staging" not found for project "multi". Available: local, prod');
+
+      await downCommand(ctx, { environment: 'prod' });
+      expect(await read('.env.local')).toContain("# env-manager env: prod\n");
+      expect(await read('.env.local')).toContain("FOO='prod'");
+
+      await downCommand(ctx);
+      expect(await read('.env.local')).toContain("FOO='prod'");
+
+      await downCommand(ctx, { environment: 'local' });
+      expect(await read('.env.local')).toContain("# env-manager env: local\n");
+      expect(await read('.env.local')).toContain("FOO='local'");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('down records the chosen environment for swift values', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-swift-env-'));
+    try {
+      const ctx = { project: 'ios', cwd: dir };
+      const schema = '# env-manager: ios\n# env-manager format: swift\n\nFOO= # {string}\n';
+      secrets.set('env-manager/ios', {
+        schema,
+        environments: {
+          local: { values: 'FOO=local\n', syncDate: '2026-01-01T00:00:00Z' },
+          prod: { values: 'FOO=prod\n', syncDate: '2026-01-01T00:00:00Z' },
+        },
+      });
+      await writeFile(path.join(dir, 'package.json'), '{}\n');
+      await writeFile(path.join(dir, '.env'), schema);
+      const xcconfig = path.join(dir, 'Config/LocalSecrets.xcconfig');
+
+      await downCommand(ctx, { environment: 'prod' });
+      expect(await readFile(path.join(dir, '.env.local'), 'utf8')).toBe('# env-manager env: prod\n');
+      expect(await readFile(xcconfig, 'utf8')).toContain('FOO = prod');
+
+      await downCommand(ctx);
+      expect(await readFile(xcconfig, 'utf8')).toContain('FOO = prod');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -56,30 +56,23 @@ export async function moveEnvironmentToValuesFile(
   await writeManagedFile(path, upsertEnvironmentInContent(content, environment));
 }
 
+export async function findEnvironment(
+  cwd: string,
+  options: ResolveEnvironmentOptions = {}
+): Promise<string | null> {
+  const candidates = new Set(options.valuesPath ? [options.valuesPath, '.env.local'] : ['.env.local']);
+  for (const candidate of candidates) {
+    const localFile = Bun.file(candidate.startsWith('/') ? candidate : `${cwd}/${candidate}`);
+    if (await localFile.exists()) return findEnvironmentInContent(await localFile.text());
+  }
+  return null;
+}
+
 export async function resolveEnvironment(
   cwd: string,
   options: ResolveEnvironmentOptions = {}
 ): Promise<string> {
-  const candidates = options.valuesPath
-    ? [options.valuesPath, '.env.local']
-    : ['.env.local'];
-  const seen = new Set<string>();
-
-  for (const candidate of candidates) {
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-
-    const path = candidate.startsWith('/') ? candidate : `${cwd}/${candidate}`;
-    const localFile = Bun.file(path);
-    if (!(await localFile.exists())) {
-      continue;
-    }
-    return resolveEnvironmentFromContent(await localFile.text());
-  }
-
-  return DEFAULT_ENVIRONMENT;
+  return (await findEnvironment(cwd, options)) ?? DEFAULT_ENVIRONMENT;
 }
 
 export function upsertEnvironmentInContent(

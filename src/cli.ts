@@ -153,18 +153,23 @@ const upCmd: CommandModule<any, any> = {
   },
 };
 
+type DownArgs = ProjectArgs & { env?: string };
+
 const downCmd: CommandModule<any, any> = {
   command: "down",
   describe:
     "Download schema + current environment values from AWS and write configured files",
   builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(yargs) as Argv<ProjectArgs>,
+    withProjectOption(yargs).option('env', {
+      type: 'string',
+      description: 'Environment to download (defaults to the one recorded in the values file)',
+    }) as Argv<DownArgs>,
   handler: async (argv) => {
-    const args = argv as unknown as ProjectArgs;
+    const args = argv as unknown as DownArgs;
     const project = resolveProject(args.project);
     validateProjectName(project, 'down');
     await checkAwsCredentials();
-    await downCommand(createContext(project));
+    await downCommand(createContext(project), { environment: args.env });
   },
 };
 
