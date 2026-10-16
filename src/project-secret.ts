@@ -1,3 +1,4 @@
+import { setHeaderVersion } from './parser';
 import {
   DEFAULT_ENVIRONMENT,
   removeEnvironmentFromContent,
@@ -16,13 +17,13 @@ export function normalizeProjectSecret(
 ): ProjectSecretPayload {
   if (payload.environments) {
     return {
-      schema: removeEnvironmentFromContent(payload.schema),
+      schema: setHeaderVersion(removeEnvironmentFromContent(payload.schema), null),
       environments: payload.environments,
     };
   }
 
   return {
-    schema: removeEnvironmentFromContent(payload.schema),
+    schema: setHeaderVersion(removeEnvironmentFromContent(payload.schema), null),
     environments: {
       [DEFAULT_ENVIRONMENT]: {
         values: payload.values ?? '',
@@ -38,7 +39,7 @@ export function createProjectSecretPayload(
   environments: Record<string, EnvironmentPayload>
 ): SecretPayload {
   return {
-    schema: removeEnvironmentFromContent(schema),
+    schema: setHeaderVersion(removeEnvironmentFromContent(schema), null),
     environments,
   };
 }

@@ -54,20 +54,24 @@ function snapshot(cwd: string): GitUpdates | undefined {
   return { root, states, originals: new Map() };
 }
 
-export async function writeManagedFile(path: string, content: string): Promise<number> {
+async function readExisting(path: string): Promise<Buffer | null> {
+  const file = Bun.file(path);
+  return await file.exists() ? Buffer.from(await file.arrayBuffer()) : null;
+}
+
+export async function writeManagedFile(path: string, content: string): Promise<boolean> {
   const session = updates.getStore();
   const absolutePath = resolve(
     await realpath(dirname(path)).catch(() => dirname(path)),
     basename(path)
   );
+  const existing = await readExisting(absolutePath);
+  if (existing?.equals(Buffer.from(content))) return false;
   if (session && !session.originals.has(absolutePath)) {
-    const file = Bun.file(absolutePath);
-    session.originals.set(
-      absolutePath,
-      await file.exists() ? Buffer.from(await file.arrayBuffer()) : null
-    );
+    session.originals.set(absolutePath, existing);
   }
-  return Bun.write(path, content);
+  await Bun.write(path, content);
+  return true;
 }
 
 export async function withGitUpdates<T>(cwd: string, operation: () => Promise<T>): Promise<T> {

@@ -1,18 +1,17 @@
 import { defaultValuesPath, parseRootConfig, upsertSetting } from '../config';
-import { planGeneration, updateConfiguredTsOutput } from './generate';
+import { planGeneration } from './generate';
+import { pullEnvironment } from './down';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
   resolveEnvironment,
 } from "../environment";
-import { writeFilesFromPayload } from "../file-sync";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import { parseEnvFile, parseEnvValues } from "../parser";
 import { normalizeProjectSecret } from "../project-secret";
 import { promptLine } from "../prompt";
 import type { CommandContext, EnvVarSchema } from "../types";
 import { EnvManagerError } from "../types";
-import { assertValid, validateEnv } from "../validator";
 import {
   createValuesConfig,
   readValuesForConfig,
@@ -21,7 +20,7 @@ import {
   writeValuesForConfig,
 } from "../values-config";
 
-const TEMPLATE = `# env-manager: {{PROJECT}} | {{DATE}}
+const TEMPLATE = `# env-manager: {{PROJECT}}
 
 # Add your environment variables below
 # Example: API_KEY= # {string:format(/^sk-/)}
@@ -160,7 +159,7 @@ async function copyGlobalDefaults({
       environment,
       {
         project,
-        syncDate: new Date().toISOString(),
+        version: null,
       }
     );
     console.log(`\nCopied selected keys to ${valuesConfig.path}`);
@@ -198,7 +197,7 @@ export async function initCommand(
 
     if (secret) {
       const projectSecret = normalizeProjectSecret(secret);
-      let schemaContent = initValuesConfig
+      const schemaContent = initValuesConfig
         ? upsertSetting(upsertSetting(projectSecret.schema, 'format', initValuesConfig.format), 'path', initValuesConfig.path)
         : projectSecret.schema;
       await planGeneration(ctx, schemaContent);
@@ -213,29 +212,7 @@ export async function initCommand(
         );
       }
 
-      const parsed = parseEnvFile(schemaContent);
-      const values = parseEnvValues(envPayload.values);
-      const result = validateEnv(parsed.schema, values);
-      assertValid(result);
-      await writeFilesFromPayload(
-        parsed.schema,
-        values,
-        envPayload.files,
-        ctx.cwd
-      );
-      await writeManagedFile(envPath, schemaContent);
-      await writeValuesForConfig(
-        ctx,
-        valuesConfig,
-        parsed.schema,
-        values,
-        environment,
-        {
-          project: parsed.header?.project ?? ctx.project,
-          syncDate: envPayload.syncDate,
-        }
-      );
-      await updateConfiguredTsOutput(ctx, schemaContent);
+      await pullEnvironment(ctx, schemaContent, environment, envPayload);
       console.log(
         `Downloaded .env from AWS for project "${ctx.project}" environment "${environment}"`
       );
@@ -254,11 +231,7 @@ export async function initCommand(
     const names = collectEnvVarNames(envContent);
     restrictToNames = new Set(names);
   } else {
-    const now = new Date().toISOString();
-    envContent = TEMPLATE.replace("{{PROJECT}}", ctx.project).replace(
-      "{{DATE}}",
-      now
-    );
+    envContent = TEMPLATE.replace("{{PROJECT}}", ctx.project);
     if (initValuesConfig) {
       envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
     }

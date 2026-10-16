@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  envContentEqualIgnoringSyncDate,
+  envContentEqualIgnoringVersion,
   envValuesEqual,
   generateLocalEnvContent,
   parseEnvFile,
@@ -10,19 +10,26 @@ import {
   parseSchemaComment,
   parseValidators,
   serializeEnvValues,
-  updateHeaderSyncDate,
-  upsertHeaderSyncDate,
+  setHeaderVersion,
+  upsertHeaderVersion,
 } from "./parser";
 import type { FormatValidator } from "./types";
 
 describe("parseHeader", () => {
   test("parses valid header", () => {
-    const result = parseHeader(
-      "# env-manager: my-project | 2025-01-15T10:30:00-05:00"
-    );
-    expect(result).toEqual({
+    expect(parseHeader("# env-manager: my-project | v12")).toEqual({
       project: "my-project",
-      syncDate: "2025-01-15T10:30:00-05:00",
+      version: 12,
+    });
+  });
+
+  test("drops legacy sync dates and missing versions", () => {
+    expect(
+      parseHeader("# env-manager: my-project | 2025-01-15T10:30:00-05:00")
+    ).toEqual({ project: "my-project", version: null });
+    expect(parseHeader("# env-manager: my-project")).toEqual({
+      project: "my-project",
+      version: null,
     });
   });
 
@@ -187,7 +194,7 @@ describe("parseFormatRegex", () => {
 
 describe("parseEnvFile", () => {
   test("parses complete env file", () => {
-    const content = `# env-manager: test-project | 2025-01-15T10:30:00-05:00
+    const content = `# env-manager: test-project | v3
 
 FOO= # {optional float}
 # {string}
@@ -198,7 +205,7 @@ PORT=3000 # {int:min(3000),max(10000)}
 
     expect(result.header).toEqual({
       project: "test-project",
-      syncDate: "2025-01-15T10:30:00-05:00",
+      version: 3,
     });
 
     expect(result.schema.map((s) => s.name)).toEqual(["FOO", "BAR", "PORT"]);
@@ -357,52 +364,48 @@ BAR='C:\\\\secrets\\\\key'
   });
 });
 
-describe("updateHeaderSyncDate", () => {
+describe("setHeaderVersion", () => {
   test("updates header after leading comments", () => {
     const input = `# comment
-# env-manager: demo | 2025-01-01T00:00:00Z
+# env-manager: demo | v1
 
 FOO=bar
 `;
-    const updated = updateHeaderSyncDate(
-      input,
-      "2025-02-01T00:00:00Z"
-    );
-    expect(updated.split("\n")[1]).toBe(
-      "# env-manager: demo | 2025-02-01T00:00:00Z"
+    expect(setHeaderVersion(input, 2).split("\n")[1]).toBe(
+      "# env-manager: demo | v2"
     );
   });
 
-  test("adds a header when one is missing", () => {
-    const updated = upsertHeaderSyncDate(
-      "FOO=bar\n",
-      "demo",
-      "2025-02-01T00:00:00Z"
-    );
+  test("replaces a legacy sync date with the version", () => {
+    expect(
+      setHeaderVersion("# env-manager: demo | 2025-01-01T00:00:00Z\n", 4)
+    ).toBe("# env-manager: demo | v4\n");
+  });
 
-    expect(updated).toBe(`# env-manager: demo | 2025-02-01T00:00:00Z
+  test("adds a header when one is missing", () => {
+    expect(upsertHeaderVersion("FOO=bar\n", "demo", 1)).toBe(`# env-manager: demo | v1
 
 FOO=bar
 `);
   });
 
-  test("compares env content without treating the header date as structure", () => {
+  test("compares env content without treating the header version as structure", () => {
     const first = `# env-manager: demo | 2025-01-01T00:00:00Z
 
 FOO=bar # {string}
 `;
-    const second = `# env-manager: demo | 2025-02-01T00:00:00Z
+    const second = `# env-manager: demo | v7
 
 FOO=bar # {string}
 `;
-    const changed = `# env-manager: demo | 2025-02-01T00:00:00Z
+    const changed = `# env-manager: demo | v7
 
 FOO=bar # {string}
 PORT=3000 # {int}
 `;
 
-    expect(envContentEqualIgnoringSyncDate(first, second)).toBe(true);
-    expect(envContentEqualIgnoringSyncDate(first, changed)).toBe(false);
+    expect(envContentEqualIgnoringVersion(first, second)).toBe(true);
+    expect(envContentEqualIgnoringVersion(first, changed)).toBe(false);
   });
 });
 
@@ -498,10 +501,10 @@ EXTRA='yes'
         },
       ],
       { API_KEY: "sk-test" },
-      { project: "demo", syncDate: "2025-02-01T00:00:00Z" }
+      { project: "demo", version: 5 }
     );
 
-    expect(content).toBe(`# env-manager: demo | 2025-02-01T00:00:00Z
+    expect(content).toBe(`# env-manager: demo | v5
 
 API_KEY='sk-test' # {string}
 `);

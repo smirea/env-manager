@@ -49,16 +49,17 @@ describe('print command formatting', () => {
   test('prints env sections and file contents separately', () => {
     const output = formatProjectPrintOutput('demo', createPayload());
 
+    expect(output).not.toContain('2026-03-07');
     expect(output).toContain('project: demo');
     expect(output).toContain('---- env: local ----');
     expect(output).toContain(
-      '.env\n# env-manager: demo | 2026-03-07T00:00:00Z'
+      '.env\n# env-manager: demo\n'
     );
     expect(output).not.toContain(
-      '.env\n# env-manager: demo | 2026-03-07T00:00:00Z\n# env-manager env: local'
+      '.env\n# env-manager: demo\n\n# env-manager env: local'
     );
     expect(output).toContain(
-      '.env.local\n# env-manager: demo | 2026-03-07T00:00:00Z\n# env-manager env: local'
+      '.env.local\n# env-manager: demo\n# env-manager env: local'
     );
     expect(output).toContain("API_KEY='secret' # {string}");
     expect(output).toContain("EXTRA_CERT='config/extra.pem' # {file}");

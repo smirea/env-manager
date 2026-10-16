@@ -2,14 +2,12 @@ import { createAwsAdapter, secretName } from "../aws";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import {
   appendSchemaEntry,
-  envContentEqualIgnoringSyncDate,
   envValuesEqual,
   generateEnvContent,
   parseEnvFile,
   parseEnvValues,
   serializeEnvValues,
-  updateHeaderSyncDate,
-  upsertHeaderSyncDate,
+  upsertHeaderVersion,
 } from "../parser";
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
@@ -35,12 +33,12 @@ function ensureValidName(name: string): void {
   }
 }
 
-function ensureGlobalSchema(schema: string, now: string): string {
+function ensureGlobalSchema(schema: string): string {
   const parsed = parseEnvFile(schema);
   if (parsed.header) {
     return schema;
   }
-  return upsertHeaderSyncDate(schema, GLOBAL_PROJECT, now);
+  return upsertHeaderVersion(schema, GLOBAL_PROJECT, null);
 }
 
 function formatTable(rows: GlobalEntry[]): string {
@@ -113,17 +111,11 @@ export async function globalSetCommand(
   const now = new Date().toISOString();
   const existing = await aws.getSecret(secretName(GLOBAL_PROJECT));
 
-  let schema = ensureGlobalSchema(existing?.schema ?? "", now);
+  let schema = ensureGlobalSchema(existing?.schema ?? "");
   const parsed = parseEnvFile(schema);
   const existsInSchema = parsed.schema.some((s) => s.name === name);
   if (!existsInSchema) {
     schema = appendSchemaEntry(schema, name, "string");
-  }
-  const schemaChanged =
-    !existing ||
-    !envContentEqualIgnoringSyncDate(schema, existing.schema);
-  if (schemaChanged) {
-    schema = updateHeaderSyncDate(schema, now);
   }
 
   const values = parseEnvValues(existing?.values ?? "");
@@ -214,11 +206,11 @@ export async function globalRmCommand(
     const filteredSchema = parsed.schema.filter((s) => s.name !== trimmed);
     const header = {
       project: parsed.header?.project ?? GLOBAL_PROJECT,
-      syncDate: now,
+      version: null,
     };
     schema =
       filteredSchema.length === 0
-        ? upsertHeaderSyncDate("", header.project, header.syncDate)
+        ? upsertHeaderVersion("", header.project, null)
         : generateEnvContent(header, filteredSchema, {});
   }
 

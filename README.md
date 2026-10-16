@@ -211,7 +211,7 @@ Every child output identifies its owner with metadata (use `//` comments in
 TypeScript and xcconfig):
 
 ```bash
-# env-manager: my-monorepo | 2026-01-01T00:00:00Z
+# env-manager: my-monorepo | v1
 # env-manager target: client
 # env-manager root: ..
 # env-manager env: staging
@@ -241,8 +241,8 @@ by another project or target.
 
 ### Compatibility
 
-Files without target declarations retain single-project behavior. Dated project
-headers, `values.format`, `values.path`, and `# env-manager ts: <reader-path>` remain
+Files without target declarations retain single-project behavior. Legacy dated
+project headers are still read; the date is dropped on the next write. `values.format`, `values.path`, and `# env-manager ts: <reader-path>` remain
 supported. New `format`, `path`, and `generate` names replace their legacy
 counterparts; declaring both is an error. `generate [path]` preserves the existing
 positional reader-path argument, and `--force` is still required to change a
@@ -259,7 +259,7 @@ not: use `check --strict` to find untyped variables in a legacy file.
 Define environment variable schemas as comments in your `.env` file:
 
 ```bash
-# env-manager: my-project | 2025-01-27T10:00:00-05:00
+# env-manager: my-project
 
 API_KEY= # {string:format(/^sk-/)}
 PORT=3000 # {int:min(3000),max(10000)}
@@ -433,7 +433,7 @@ values file with any new global defaults you've added. Only keys that exist in
 Edit `.env` to add your variables with schema comments:
 
 ```bash
-# env-manager: my-app | 2025-01-27T10:00:00-05:00
+# env-manager: my-app
 
 DATABASE_URL= # {string}
 PORT=3000 # {int:min(1000),max(65535)}
@@ -446,7 +446,7 @@ Create the configured values file with actual values (not committed to git).
 For the default `ts` format this is `.env.local`:
 
 ```bash
-# env-manager: my-app | 2025-01-27T10:00:00-05:00
+# env-manager: my-app | v3
 # env-manager env: local
 
 DATABASE_URL=postgres://localhost:5432/mydb
@@ -454,10 +454,19 @@ PORT=3000
 DEBUG=true
 ```
 
-The `.env` header date versions the schema/template. It only changes when the
-stored schema changes. In `ts` mode, the values file header date versions the
-actual values, and the environment comment selects which remote environment
-commands use.
+`.env` is tracked in git, so its header carries no version. Every values file
+and generated output has its own version instead: the root values file, each
+target child, and each reader. The version sits at the end of the file's header
+(`| vN`).
+
+An output's version increments only when the content env-manager would write for
+it changes. A file is rewritten only when its version is lower than the known
+version, so formatter-only edits to generated files survive later runs. AWS
+stores each environment's output versions with a content hash and date. The root
+values file mirrors them as `# env-manager output: <path> vN <hash>` lines, which
+lets `generate` work offline. No dates are written into files. `up` skips the
+AWS write when nothing changed. `down` rewrites the root values file only when
+its values differ from AWS or its version is behind.
 
 ### 4. Generate typed env access
 

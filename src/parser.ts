@@ -9,18 +9,18 @@ import type {
 import { ParseError } from "./types";
 
 const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
-const SYNC_DATE_PLACEHOLDER = "__env_manager_sync_date__";
-
-function formatHeaderLine(header: EnvFileHeader): string {
-  return `# env-manager: ${header.project}${header.syncDate ? ` | ${header.syncDate}` : ""}`;
+export function formatHeaderLine(header: EnvFileHeader): string {
+  return `# env-manager: ${header.project}${header.version === null ? "" : ` | v${header.version}`}`;
 }
 
+// Anything after "|" that is not a version is a legacy sync date and is dropped.
 export function parseHeader(line: string): EnvFileHeader | null {
   const match = line.match(/^#\s*env-manager:\s*([^\s|]+)(?:\s*\|\s*(.+))?\s*$/);
   if (!match) return null;
+  const version = match[2]?.trim().match(/^v(\d+)$/)?.[1];
   return {
     project: match[1].trim(),
-    syncDate: match[2]?.trim() ?? "",
+    version: version === undefined ? null : Number(version),
   };
 }
 
@@ -412,16 +412,13 @@ export function formatSchemaComment(s: EnvVarSchema): string {
   return `# {${inner}}`;
 }
 
-export function updateHeaderSyncDate(content: string, newDate: string): string {
+export function setHeaderVersion(content: string, version: number | null): string {
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const header = parseHeader(line);
     if (header) {
-      lines[i] = formatHeaderLine({
-        project: header.project,
-        syncDate: newDate,
-      });
+      lines[i] = formatHeaderLine({ project: header.project, version });
       break;
     }
     const trimmed = line.trim();
@@ -435,36 +432,27 @@ export function updateHeaderSyncDate(content: string, newDate: string): string {
   return lines.join("\n");
 }
 
-export function upsertHeaderSyncDate(
+export function upsertHeaderVersion(
   content: string,
   project: string,
-  newDate: string
+  version: number | null
 ): string {
   if (parseEnvFile(content).header) {
-    return updateHeaderSyncDate(content, newDate);
+    return setHeaderVersion(content, version);
   }
 
-  const header = formatHeaderLine({ project, syncDate: newDate });
+  const header = formatHeaderLine({ project, version });
   if (content.trim() === "") {
     return `${header}\n\n`;
   }
   return `${header}\n\n${content}`;
 }
 
-export function envContentEqualIgnoringSyncDate(
+export function envContentEqualIgnoringVersion(
   left: string,
   right: string
 ): boolean {
-  return (
-    upsertComparableHeaderDate(left) === upsertComparableHeaderDate(right)
-  );
-}
-
-function upsertComparableHeaderDate(content: string): string {
-  if (!parseEnvFile(content).header) {
-    return content;
-  }
-  return updateHeaderSyncDate(content, SYNC_DATE_PLACEHOLDER);
+  return setHeaderVersion(left, null) === setHeaderVersion(right, null);
 }
 
 export function serializeEnvValues(values: EnvValues): string {

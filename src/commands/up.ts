@@ -1,4 +1,4 @@
-import { planGeneration, updateConfiguredTsOutput } from './generate';
+import { planGeneration, syncOutputs } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
@@ -6,13 +6,13 @@ import {
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import {
-  envContentEqualIgnoringSyncDate,
+  envContentEqualIgnoringVersion,
   envValuesEqual,
   parseEnvFile,
   parseEnvValues,
   serializeEnvValues,
-  updateHeaderSyncDate,
-  upsertHeaderSyncDate,
+  setHeaderVersion,
+  upsertHeaderVersion,
 } from "../parser";
 import {
   createProjectSecretPayload,
@@ -25,8 +25,8 @@ import {
   parseSwiftValues,
   resolveValuesConfig,
   resolveValuesOutputPath,
-  writeValuesForConfig,
 } from "../values-config";
+import { versionRecordsEqual } from "../versions";
 
 export async function upCommand(ctx: CommandContext): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
@@ -48,7 +48,6 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   await planGeneration(ctx, envContent);
   const aws = createAwsAdapter();
-  const now = new Date().toISOString();
   const valuesConfig = await resolveValuesConfig(ctx, envContent);
   const environment = await resolveEnvironment(ctx.cwd, {
     valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
@@ -66,7 +65,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
       );
     }
 
-    envContent = upsertHeaderSyncDate(envContent, ctx.project, now);
+    envContent = upsertHeaderVersion(envContent, ctx.project, null);
     envContentChanged = true;
     console.log(`Added env-manager header to ${envPath}`);
     parsed = parseEnvFile(envContent);
@@ -89,65 +88,45 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   const files = await collectFilePayload(parsed.schema, values, ctx.cwd);
 
-  let schemaForPayload = existingProject?.schema ?? envContent;
-  const schemaChanged =
-    !existingProject ||
-    !envContentEqualIgnoringSyncDate(
-      envContent,
-      existingProject.schema
-    );
-  if (schemaChanged) {
-    const updatedEnvContent = updateHeaderSyncDate(envContent, now);
-    if (updatedEnvContent !== envContent) {
-      envContent = updatedEnvContent;
-      envContentChanged = true;
-    }
-    schemaForPayload = envContent;
+  const unversionedEnvContent = setHeaderVersion(envContent, null);
+  if (unversionedEnvContent !== envContent) {
+    envContent = unversionedEnvContent;
+    envContentChanged = true;
   }
 
+  const schemaChanged =
+    !existingProject ||
+    !envContentEqualIgnoringVersion(envContent, existingProject.schema);
   const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");
   const valuesChanged =
     !existingEnvironment ||
     !envValuesEqual(values, remoteValues) ||
     !envValuesEqual(files, existingEnvironment.files ?? {});
-  const valuesSyncDate = valuesChanged
-    ? now
-    : existingEnvironment?.syncDate ?? now;
+  const outputs = await syncOutputs(ctx, envContent, existingEnvironment?.outputs);
+  const changed = schemaChanged || valuesChanged
+    || !versionRecordsEqual(outputs, existingEnvironment?.outputs ?? {});
 
-  if (valuesChanged && valuesFileExists && valuesConfig.format === 'ts') {
-    await writeValuesForConfig(
-      ctx,
-      valuesConfig,
-      parsed.schema,
-      values,
-      environment,
-      {
-        project: parsed.header?.project ?? ctx.project,
-        syncDate: valuesSyncDate,
-      }
-    );
+  if (changed) {
+    const environments = {
+      ...existingProject?.environments,
+      [environment]: {
+        values: serializeEnvValues(values),
+        syncDate: valuesChanged || !existingEnvironment ? new Date().toISOString() : existingEnvironment.syncDate,
+        files: Object.keys(files).length > 0 ? files : undefined,
+        outputs,
+      },
+    };
+    const payload: SecretPayload = createProjectSecretPayload(envContent, environments);
+    await aws.putSecret(secretName(ctx.project), payload);
   }
 
-  const environments = {
-    ...existingProject?.environments,
-    [environment]: {
-      values: serializeEnvValues(values),
-      syncDate: valuesSyncDate,
-      files: Object.keys(files).length > 0 ? files : undefined,
-    },
-  };
-  const payload: SecretPayload = createProjectSecretPayload(
-    schemaForPayload,
-    environments
-  );
-
-  await aws.putSecret(secretName(ctx.project), payload);
   if (envContentChanged) {
     await writeManagedFile(envPath, envContent);
   }
-  await updateConfiguredTsOutput(ctx, envContent);
 
   console.log(
-    `Uploaded ${ctx.project}/${environment} to AWS Secrets Manager`
+    changed
+      ? `Uploaded ${ctx.project}/${environment} to AWS Secrets Manager`
+      : `${ctx.project}/${environment} is already up to date`
   );
 }

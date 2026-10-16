@@ -109,7 +109,7 @@ function formatEnvironmentPrintOutput(
   const localEnvContent = upsertEnvironmentInContent(
     generateLocalEnvContent(parsed.schema, values, {
       project: parsed.header?.project ?? project,
-      syncDate: envPayload.syncDate,
+      version: envPayload.outputs?.['.env.local']?.version ?? null,
     }),
     environment
   ).trimEnd();
@@ -132,6 +132,7 @@ export function formatProjectPrintOutput(
   options: { environment?: string } = {}
 ): string {
   const projectSecret = normalizeProjectSecret(payload);
+  const schema = projectSecret.schema;
   const environments = options.environment
     ? [options.environment]
     : Object.keys(projectSecret.environments).sort();
@@ -139,7 +140,7 @@ export function formatProjectPrintOutput(
   if (environments.length === 0) {
     return [
       `project: ${project}`,
-      formatSection('.env', projectSecret.schema.trimEnd()),
+      formatSection('.env', schema.trimEnd()),
       formatSection('environments', ''),
     ].join('\n\n');
   }
@@ -156,7 +157,7 @@ export function formatProjectPrintOutput(
       return formatEnvironmentPrintOutput(
         project,
         environment,
-        projectSecret.schema,
+        schema,
         envPayload
       );
     })

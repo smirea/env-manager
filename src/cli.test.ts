@@ -113,12 +113,14 @@ describe('persistent local and target workflows', () => {
       expect(run(cwd, cli, 'gen').code).toBe(0);
       expect(git(cwd, 'show', 'HEAD:.env')).not.toContain('env-manager env:');
       expect(git(cwd, 'status', '--porcelain', '--untracked-files=no')).toBe('');
-      expect(await readFile(join(cwd, '.env.local'), 'utf8')).toBe('# env-manager env: staging\n');
+      const local = await readFile(join(cwd, '.env.local'), 'utf8');
+      expect(local.split('\n')[0]).toBe('# env-manager: demo | v1');
+      expect(local).toContain('# env-manager env: staging\n');
 
       await writeFile(join(cwd, '.env'), schema.replace('staging', 'prod'));
       expect(run(cwd, cli, 'format', '--local').code).toBe(0);
       expect(await readFile(join(cwd, '.env'), 'utf8')).not.toContain('env-manager env:');
-      expect(await readFile(join(cwd, '.env.local'), 'utf8')).toBe('# env-manager env: staging\n');
+      expect(await readFile(join(cwd, '.env.local'), 'utf8')).toBe(local);
     });
   });
 
@@ -183,7 +185,9 @@ SERVER_KEY= # {string}
       expect(reader).not.toContain('client-secret');
       expect(reader).not.toContain('server-secret');
       expect(reader).toContain('// env-manager target: client');
-      expect(await readFile(join(cwd, '.env.local'), 'utf8')).toBe(source);
+      const root = await readFile(join(cwd, '.env.local'), 'utf8');
+      expect(root.split('\n').filter(line => !line.startsWith('# env-manager: ') && !line.startsWith('# env-manager output: ')).join('\n')).toBe(source);
+      expect(root).toContain('# env-manager output: client/.env v1 ');
       expect(run(join(cwd, 'client'), cli, 'check').code).toBe(0);
       const rootSchema = await readFile(join(cwd, '.env'), 'utf8');
       await writeFile(join(cwd, '.env'), rootSchema.replace('ios format=swift', 'ios format=swift path=config/.env'));

@@ -1,4 +1,4 @@
-import { parseEnvFile, parseEnvLine, parseHeader, parseSchemaComment, formatSchemaComment, findInlineCommentIndex } from './parser';
+import { formatHeaderLine, parseEnvFile, parseEnvLine, parseHeader, parseSchemaComment, formatSchemaComment, findInlineCommentIndex } from './parser';
 import { validateEnv } from './validator';
 import { EnvManagerError, type ParsedEnvFile, type EnvVarSchema } from './types';
 import { isAbsolute, normalize } from 'node:path';
@@ -56,7 +56,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
     if (header) {
       if (projectSeen) configError(file, line, 'Duplicate project header.');
       projectSeen = true;
-      metadata.set(line, `# env-manager: ${header.project}${header.syncDate ? ` | ${header.syncDate}` : ''}`);
+      metadata.set(line, formatHeaderLine({ project: header.project, version: null }));
       continue;
     }
     const match = text.match(/^#\s*env-manager\s+([\w.]+)\s*:\s*(.*?)\s*$/);

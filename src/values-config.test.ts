@@ -142,7 +142,7 @@ ${content}`)).toEqual({
         schema,
         { GIPHY_API_KEY: 'giphy-secret' },
         'staging',
-        { project: 'demo', syncDate: '2026-01-01T00:00:00Z' }
+        { project: 'demo', version: 1 }
       );
       await writeValuesForConfig(
         ctx,
@@ -150,7 +150,7 @@ ${content}`)).toEqual({
         schema,
         { GIPHY_API_KEY: 'giphy-secret' },
         'staging',
-        { project: 'demo', syncDate: '2026-01-01T00:00:00Z' }
+        { project: 'demo', version: 1 }
       );
 
       expect(await readFile(path.join(dir, '.env.local'), 'utf8')).toContain(

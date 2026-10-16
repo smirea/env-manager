@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generateCommand, updateConfiguredTsOutput } from './generate';
+import { generateCommand, syncOutputs } from './generate';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
@@ -147,7 +147,7 @@ describe('generate command', () => {
     await withTempDir(async (dir) => {
       await mkdir(path.join(dir, 'generated'), { recursive: true });
 
-      await updateConfiguredTsOutput(
+      await syncOutputs(
         { project: 'test-project', cwd: dir },
         [
           '# env-manager: test-project | 2025-01-01T00:00:00Z',
@@ -183,6 +183,68 @@ describe('generate command', () => {
       await expect(
         generateCommand({ project: 'test-project', cwd: dir }, 'env.ts')
       ).rejects.toThrow('only works when values.format is "ts"');
+    });
+  });
+
+  test('versions each output and rewrites only when the version is lower', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project | 2025-01-01T00:00:00Z\n\nFOO=bar # {string}\n');
+      await generateCommand(ctx, 'env.ts');
+      const reader = await read('env.ts');
+      expect(reader.split('\n')[0]).toBe('// env-manager: test-project | v1');
+      expect(await read('.env')).toBe('# env-manager: test-project | 2025-01-01T00:00:00Z\n# env-manager ts: env.ts\n\nFOO=bar # {string}\n');
+      const local = await read('.env.local');
+      expect(local.split('\n').slice(0, 3).map(line => line.replace(/[0-9a-f]{16}$/, '<hash>'))).toEqual([
+        '# env-manager: test-project | v1',
+        '# env-manager output: .env.local v1 <hash>',
+        '# env-manager output: env.ts v1 <hash>',
+      ]);
+
+      const formatted = reader.replaceAll("'", '"').replace('  FOO: z.string(),', '    FOO: z.string(),');
+      await writeFile(path.join(dir, 'env.ts'), formatted);
+      await generateCommand(ctx);
+      expect(await read('env.ts')).toBe(formatted);
+      expect(await read('.env.local')).toBe(local);
+
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager ts: env.ts\n\nFOO=bar # {string}\nBAR=1 # {int}\n');
+      await generateCommand(ctx);
+      const regenerated = await read('env.ts');
+      expect(regenerated.split('\n')[0]).toBe('// env-manager: test-project | v2');
+      expect(regenerated).toContain('  BAR: z.coerce.number().int(),');
+    });
+  });
+
+  test('versions each target child separately', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), [
+        '# env-manager: test-project',
+        '# env-manager target: client format=ts path=.env.local',
+        '# env-manager target: server format=ts path=.env.local',
+        '# env-manager targets: client',
+        'FOO= # {string}',
+        '# env-manager targets: server',
+        'BAR= # {string}',
+        '',
+      ].join('\n'));
+      await writeFile(path.join(dir, '.env.local'), 'FOO=one\nBAR=one\n');
+      await generateCommand(ctx);
+      const client = await read('client/.env.local');
+      expect(client.split('\n')[0]).toBe('# env-manager: test-project | v1');
+      expect(client).toContain("FOO='one' # {string}");
+
+      const formatted = client.replace("FOO='one'", 'FOO="one"');
+      await writeFile(path.join(dir, 'client/.env.local'), formatted);
+      await writeFile(path.join(dir, '.env.local'), (await read('.env.local')).replace('BAR=one', 'BAR=two'));
+      await generateCommand(ctx);
+      expect(await read('client/.env.local')).toBe(formatted);
+      const server = await read('server/.env.local');
+      expect(server.split('\n')[0]).toBe('# env-manager: test-project | v2');
+      expect(server).toContain("BAR='two' # {string}");
+      expect((await read('.env.local')).split('\n')[0]).toBe('# env-manager: test-project | v2');
     });
   });
 });

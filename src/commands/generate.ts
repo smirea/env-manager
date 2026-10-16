@@ -4,8 +4,9 @@ import { mkdir } from 'node:fs/promises';
 import { configError, parseRootConfig, relativeOutput, schemaForTarget, upsertSetting, type RootConfig } from '../config';
 import { preflightPaths, type OutputPath } from '../output-paths';
 import { resolveEnvironment, upsertEnvironmentInContent } from '../environment';
-import { generateLocalEnvContent, parseHeader } from '../parser';
-import type { CommandContext, EnvVarSchema } from '../types';
+import { generateLocalEnvContent } from '../parser';
+import type { CommandContext, EnvVarSchema, OutputVersions } from '../types';
+import { formatPrefixedHeader, hashContent, parseVersionRecord, readFileVersion, resolveVersion, upsertSourceMetadata, type CommentPrefix } from '../versions';
 import { EnvManagerError } from '../types';
 import { generateSwiftValuesContent, readValuesForConfig, resolveValuesConfig, type ValuesConfig } from '../values-config';
 import { validateEnv } from '../validator';
@@ -96,10 +97,14 @@ export async function planGeneration(ctx: CommandContext, content: string): Prom
   return { config, outputs, valuesConfig };
 }
 
-function ownership(ctx: CommandContext, output: PlannedOutput, environment: string, date: string): string {
-  const prefix = output.format === 'swift' || output.kind === 'reader' ? '//' : '#';
+function commentPrefix(output: PlannedOutput): CommentPrefix {
+  return output.format === 'swift' || output.kind === 'reader' ? '//' : '#';
+}
+
+function ownership(ctx: CommandContext, output: PlannedOutput, environment: string, version: number | null): string {
+  const prefix = commentPrefix(output);
   return [
-    `${prefix} env-manager: ${ctx.project}${date ? ` | ${date}` : ''}`,
+    formatPrefixedHeader(prefix, ctx.project, version),
     `${prefix} env-manager target: ${output.target}`,
     `${prefix} env-manager root: ${relative(dirname(output.path), ctx.cwd) || '.'}`,
     `${prefix} env-manager env: ${environment}`,
@@ -107,15 +112,24 @@ function ownership(ctx: CommandContext, output: PlannedOutput, environment: stri
   ].join('\n');
 }
 
-async function materializePlan(ctx: CommandContext, plan: GenerationPlan, targetName?: string): Promise<void> {
-  if (targetName && !plan.config.targets.some(t => t.name === targetName)) configError(join(ctx.cwd, '.env'), 1, `Unknown target "${targetName}".`);
+function renderOutput(ctx: CommandContext, output: PlannedOutput, values: Record<string, string>, environment: string, version: number | null): string {
+  const content = output.kind === 'reader' ? generateReader(output.schema)
+    : output.format === 'swift' ? generateSwiftValuesContent(output.schema, values)
+    : generateLocalEnvContent(output.schema, values);
+  if (output.target) return ownership(ctx, output, environment, version) + content;
+  if (output.kind === 'reader') return `${formatPrefixedHeader('//', ctx.project, version)}\n${content}`;
+  if (output.format === 'swift') return content;
+  return upsertEnvironmentInContent(content ? `${formatPrefixedHeader('#', ctx.project, null)}\n\n${content}` : `${formatPrefixedHeader('#', ctx.project, null)}\n`, environment);
+}
+
+type MaterializeOptions = { target?: string; remote?: OutputVersions; readers?: boolean; createSource?: boolean };
+
+// Each output's version only moves when its rendered content changes, and a file is
+// rewritten only when its version is lower, so formatter-only edits survive reruns.
+export async function materializePlan(ctx: CommandContext, plan: GenerationPlan, options: MaterializeOptions = {}): Promise<OutputVersions> {
+  if (options.target && !plan.config.targets.some(t => t.name === options.target)) configError(join(ctx.cwd, '.env'), 1, `Unknown target "${options.target}".`);
   const values = await readValuesForConfig(ctx, plan.valuesConfig);
   const environment = await resolveEnvironment(ctx.cwd, { valuesPath: plan.valuesConfig.format === 'ts' ? plan.valuesConfig.path : undefined });
-  const sourceFile = Bun.file(join(ctx.cwd, plan.valuesConfig.path));
-  const sourceExists = await sourceFile.exists();
-  const sourceContent = sourceExists ? await sourceFile.text() : '';
-  const sourceDate = sourceContent.split('\n').map(parseHeader).find(Boolean)?.syncDate;
-  const date = sourceExists ? sourceDate || plan.config.header?.syncDate || '' : new Date().toISOString();
   for (const entry of plan.config.schema) {
     const value = values[entry.name] ?? entry.defaultValue;
     if (value !== null && value !== undefined && value !== '') {
@@ -123,27 +137,47 @@ async function materializePlan(ctx: CommandContext, plan: GenerationPlan, target
       if (!result.valid) configError(join(ctx.cwd, plan.valuesConfig.path), 1, `Invalid value for ${entry.name}: ${result.errors[0].message}`);
     }
   }
-  const writes: { path: string; content: string }[] = [];
+  const source = plan.outputs.find(o => o.source)!;
+  const sourceFile = Bun.file(source.path);
+  const sourceExists = await sourceFile.exists();
+  const sourceContent = sourceExists ? await sourceFile.text() : null;
+  const local = parseVersionRecord(sourceContent ?? '');
+  const candidates = [options.remote, local];
+  const record: OutputVersions = {};
   for (const output of plan.outputs) {
-    if (targetName && output.target && output.target !== targetName) continue;
-    if (output.source && sourceExists) continue;
+    const key = relative(ctx.cwd, output.path);
+    if (local[key]) record[key] = local[key];
+  }
+  for (const output of plan.outputs) {
+    if (options.target && output.target && output.target !== options.target) continue;
+    if (output.kind === 'reader' && options.readers === false) continue;
+    const key = relative(ctx.cwd, output.path);
     const selectedValues: Record<string, string> = {};
     for (const entry of output.schema) selectedValues[entry.name] = values[entry.name] ?? entry.defaultValue ?? '';
-    let content = output.kind === 'reader' ? generateReader(output.schema) : output.format === 'swift'
-      ? generateSwiftValuesContent(output.schema, selectedValues)
-      : generateLocalEnvContent(output.schema, selectedValues, { project: ctx.project, syncDate: date });
-    if (output.target) {
-      if (output.kind === 'values' && output.format === 'ts') content = generateLocalEnvContent(output.schema, selectedValues);
-      content = ownership(ctx, output, environment, date) + content;
-    } else if (output.kind === 'values' && output.format === 'ts') content = upsertEnvironmentInContent(content, environment);
-    writes.push({ path: output.path, content });
+    const file = Bun.file(output.path);
+    const existing = output.source ? sourceContent : await file.exists() ? await file.text() : null;
+    const fileVersion = existing === null ? null : readFileVersion(existing);
+    const entry = resolveVersion(key, hashContent(renderOutput(ctx, output, selectedValues, environment, null)), candidates, {
+      version: fileVersion,
+      unchanged: !output.source && existing !== null && existing === renderOutput(ctx, output, selectedValues, environment, fileVersion),
+    });
+    record[key] = entry;
+    if (output.source || (fileVersion !== null && fileVersion >= entry.version)) continue;
+    await mkdir(dirname(output.path), { recursive: true });
+    if (await writeManagedFile(output.path, renderOutput(ctx, output, selectedValues, environment, entry.version))) {
+      console.log(`Generated ${key}`);
+    }
   }
-  for (const write of writes) {
-    await mkdir(dirname(write.path), { recursive: true });
-    if (await Bun.file(write.path).exists() && await Bun.file(write.path).text() === write.content) continue;
-    await writeManagedFile(write.path, write.content);
-    console.log(`Generated ${relative(ctx.cwd, write.path)}`);
+  const sourceKey = relative(ctx.cwd, source.path);
+  if (sourceExists || options.createSource) {
+    const selectedValues: Record<string, string> = {};
+    for (const entry of source.schema) selectedValues[entry.name] = values[entry.name] ?? entry.defaultValue ?? '';
+    const base = sourceContent ?? renderOutput(ctx, source, selectedValues, environment, null);
+    await mkdir(dirname(source.path), { recursive: true });
+    const written = await writeManagedFile(source.path, upsertSourceMetadata(base, commentPrefix(source), ctx.project, record[sourceKey].version, record));
+    if (written && !sourceExists) console.log(`Generated ${sourceKey}`);
   }
+  return record;
 }
 
 export async function generateCommand(
@@ -176,20 +210,12 @@ export async function generateCommand(
     content = lines.join('\n');
   }
   const plan = await planGeneration(ctx, content);
-  await materializePlan(ctx, plan, options.target);
+  await materializePlan(ctx, plan, { target: options.target, createSource: true });
   if (content !== original) await writeManagedFile(envPath, content);
 }
 
-export async function updateConfiguredTsOutput(ctx: CommandContext, envContent: string): Promise<void> {
-  const config = parseRootConfig(envContent, join(ctx.cwd, '.env'));
-  if (config.targets.length) {
-    await materializePlan(ctx, await planGeneration(ctx, envContent));
-  } else if (config.generate || config.modern) {
-    const plan = await planGeneration(ctx, envContent);
-    for (const output of plan.outputs.filter(o => o.kind === 'reader')) {
-      await mkdir(dirname(output.path), { recursive: true });
-      await writeManagedFile(output.path, generateReader(output.schema));
-      console.log(`Generated ${relative(ctx.cwd, output.path)}`);
-    }
-  }
+export async function syncOutputs(ctx: CommandContext, envContent: string, remote?: OutputVersions): Promise<OutputVersions> {
+  const plan = await planGeneration(ctx, envContent);
+  const readers = plan.config.targets.length > 0 || !!plan.config.generate || plan.config.modern;
+  return materializePlan(ctx, plan, { remote, readers });
 }

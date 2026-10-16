@@ -1,5 +1,6 @@
 import { parseRootConfig, configError } from '../config';
-import { planGeneration, updateConfiguredTsOutput } from './generate';
+import { planGeneration } from './generate';
+import { upCommand } from './up';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
 import {
@@ -13,19 +14,13 @@ import { OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD } from "../keys/openrouter";
 import { promptLine } from "../prompt";
 import {
   appendSchemaEntry,
-  envContentEqualIgnoringSyncDate,
   envValuesEqual,
   parseEnvFile,
   parseEnvValues,
   serializeEnvValues,
-  updateHeaderSyncDate,
-  upsertHeaderSyncDate,
+  upsertHeaderVersion,
 } from "../parser";
-import {
-  createProjectSecretPayload,
-  normalizeProjectSecret,
-} from "../project-secret";
-import type { CommandContext, SecretPayload } from "../types";
+import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
 import {
@@ -159,7 +154,7 @@ async function saveToGlobal(
   const now = new Date().toISOString();
 
   if (!secret) {
-    const header = `# env-manager: ${GLOBAL_PROJECT} | ${now}\n\n`;
+    const header = `# env-manager: ${GLOBAL_PROJECT}\n\n`;
     const locations = location ? { [keyName]: location } : undefined;
     secret = {
       schema: header + `${keyName}= # {${schemaType}}\n`,
@@ -171,19 +166,12 @@ async function saveToGlobal(
     let schema = secret.schema;
     let parsed = parseEnvFile(schema);
     if (!parsed.header) {
-      schema = upsertHeaderSyncDate(schema, GLOBAL_PROJECT, now);
+      schema = upsertHeaderVersion(schema, GLOBAL_PROJECT, null);
       parsed = parseEnvFile(schema);
     }
     const existsInSchema = parsed.schema.some((s) => s.name === keyName);
     if (!existsInSchema) {
       schema = appendSchemaEntry(schema, keyName, schemaType);
-    }
-    const schemaChanged = !envContentEqualIgnoringSyncDate(
-      schema,
-      secret.schema
-    );
-    if (schemaChanged) {
-      schema = updateHeaderSyncDate(schema, now);
     }
 
     const values = parseEnvValues(secret.values ?? '');
@@ -283,11 +271,6 @@ export async function newKeyCommand(
 
   await planGeneration(ctx, envContent);
   const aws = createAwsAdapter();
-  const projectSecret = await aws.getSecret(secretName(ctx.project));
-  const existingProject = projectSecret
-    ? normalizeProjectSecret(projectSecret)
-    : null;
-  const existingEnvironment = existingProject?.environments[environment];
   const globalValue = await getGlobalValue(aws, keyName);
 
   let key: string;
@@ -338,48 +321,8 @@ export async function newKeyCommand(
   const result = validateEnv(updatedParsed.schema, values);
   assertValid(result);
 
-  const files = await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
+  await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
 
-  const now = new Date().toISOString();
-  let schemaForPayload = existingProject?.schema ?? envContent;
-  const schemaChanged =
-    !existingProject ||
-    !envContentEqualIgnoringSyncDate(
-      envContent,
-      existingProject.schema
-    );
-  if (schemaChanged) {
-    const updatedEnvContent = updateHeaderSyncDate(envContent, now);
-    if (updatedEnvContent !== envContent) {
-      envContent = updatedEnvContent;
-      envContentChanged = true;
-    }
-    schemaForPayload = envContent;
-  }
-
-  const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");
-  const valuesChanged =
-    !existingEnvironment ||
-    !envValuesEqual(values, remoteValues) ||
-    !envValuesEqual(files, existingEnvironment.files ?? {});
-  const valuesSyncDate = valuesChanged
-    ? now
-    : existingEnvironment?.syncDate ?? now;
-
-  const environments = {
-    ...existingProject?.environments,
-    [environment]: {
-      values: serializeEnvValues(values),
-      syncDate: valuesSyncDate,
-      files: Object.keys(files).length > 0 ? files : undefined,
-    },
-  };
-  const payload: SecretPayload = createProjectSecretPayload(
-    schemaForPayload,
-    environments
-  );
-
-  await aws.putSecret(secretName(ctx.project), payload);
   if (envContentChanged) {
     await writeManagedFile(envPath, envContent);
   }
@@ -390,14 +333,10 @@ export async function newKeyCommand(
       updatedParsed.schema,
       localValues,
       environment,
-      {
-        project: ctx.project,
-        syncDate: valuesSyncDate,
-      }
+      { project: ctx.project, version: null }
     );
   }
-
-  await updateConfiguredTsOutput(ctx, envContent);
+  await upCommand(ctx);
 
   if (!globalValue || key !== globalValue) {
     await saveToGlobal(aws, keyName, key, keyDef.schemaType, ctx.project);

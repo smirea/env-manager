@@ -23,7 +23,7 @@ export interface EnvVarSchema {
 
 export interface EnvFileHeader {
   project: string;
-  syncDate: string;
+  version: number | null;
 }
 
 export interface ParsedEnvFile {
@@ -34,10 +34,19 @@ export interface ParsedEnvFile {
 
 export type EnvValues = Record<string, string>;
 
+export interface OutputVersion {
+  version: number;
+  hash: string;
+  date?: string;
+}
+
+export type OutputVersions = Record<string, OutputVersion>;
+
 export interface EnvironmentPayload {
   values: string;
   syncDate: string;
   files?: Record<string, string>;
+  outputs?: OutputVersions;
 }
 
 export interface SecretPayload {

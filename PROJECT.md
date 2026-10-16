@@ -9,7 +9,7 @@ utility to manage my own environment variables for all my personal projects
     schema + defaults are embedded as comments in the `.env` file. format: `# {optional?, type:validators?}`. example:
 
     ```
-    # env-manager: project-name | 2025-01-15T10:30:00-05:00
+    # env-manager: project-name
 
     FOO= # {optional float}
     # {string}
@@ -27,11 +27,11 @@ utility to manage my own environment variables for all my personal projects
 
 3. cli script
 
-    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and configured values. `.env` date only changes when the schema/template changes from AWS; the values file date only changes in `ts` mode when values change. defaults project to the `.env` header, then basename of cwd
+    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and configured values. Skips the AWS write when nothing changed. defaults project to the `.env` header, then basename of cwd
 
-    3.2. `env-manager down [-p --project=<name>]` - syncs `.env` and configured values from aws, preserving the stored schema date and writing the stored value date in `ts` mode
+    3.2. `env-manager down [-p --project=<name>]` - syncs `.env` and configured values from aws; the values file is rewritten only when its values differ or its version is behind
 
-    3.3. `env-manager generate [path]` - materializes local values and TS readers (default `src/env.ts`). Swift produces values only. `--target <name>` selects one monorepo target. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
+    3.3. `env-manager generate [path]` - materializes local values and TS readers (default `src/env.ts`). Swift produces values only. `--target <name>` selects one monorepo target. Every values file and generated output has its own `| vN` header version, stored per environment in AWS and mirrored in the root values file; an output is rewritten only when its file version is lower, so formatter-only edits survive. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
 
     3.4. `env-manager init [-p --project=<name>] [--values-format ts|swift --values-path <path>]` - creates `.env` from aws if project exists, otherwise creates empty template with header. `--local` skips AWS credentials, remote project lookup, global defaults, and automatic Git updates
 
@@ -107,7 +107,7 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 - validator parsing is strict and rejects unknown or invalid validators
 - header detection tolerates leading non-schema comments before the header
 - file sync only supports UTF-8 text; binary files are rejected
-- latest matching version is source of truth: `.env` tracks schema/template version, `ts` values files track value version
+- `.env` carries no version; each values file and generated output carries its own version, bumped only when its rendered content changes
 
 ## Generated TypeScript (env-manager generate)
 
