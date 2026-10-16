@@ -217,6 +217,9 @@ TypeScript and xcconfig):
 # env-manager env: staging
 ```
 
+Readers omit the `env-manager env:` line because their content depends only on
+the schema, so switching environments never rewrites a committed reader.
+
 The root pointer is relative to the output file's directory. These are ownership
 headers, not declarations. Commands from child directories find the owning root
 through that pointer or by walking to the root `.env`. Broken or mismatched

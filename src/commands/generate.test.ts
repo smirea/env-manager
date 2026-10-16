@@ -261,4 +261,27 @@ describe('generate command', () => {
       expect((await read('.env.local')).split('\n')[0]).toBe('# env-manager: test-project | v2');
     });
   });
+
+  test('switching environments leaves target readers untouched', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), [
+        '# env-manager: test-project',
+        '# env-manager target: client format=ts generate=src/env.ts',
+        '# env-manager targets: client',
+        'FOO= # {string}',
+        '',
+      ].join('\n'));
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: staging\nFOO=one\n');
+      await generateCommand(ctx);
+      const reader = await read('client/src/env.ts');
+      expect(reader).not.toContain('env-manager env:');
+
+      await writeFile(path.join(dir, '.env.local'), (await read('.env.local')).replace('env: staging', 'env: production'));
+      await generateCommand(ctx);
+      expect(await read('client/src/env.ts')).toBe(reader);
+      expect(await read('client/.env.local')).toContain('# env-manager env: production');
+    });
+  });
 });

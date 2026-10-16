@@ -109,7 +109,7 @@ function ownership(ctx: CommandContext, output: PlannedOutput, environment: stri
     formatPrefixedHeader(prefix, ctx.project, version),
     `${prefix} env-manager target: ${output.target}`,
     `${prefix} env-manager root: ${relative(dirname(output.path), ctx.cwd) || '.'}`,
-    `${prefix} env-manager env: ${environment}`,
+    ...output.kind === 'reader' ? [] : [`${prefix} env-manager env: ${environment}`],
     '',
   ].join('\n');
 }
