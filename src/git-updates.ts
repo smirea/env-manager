@@ -12,7 +12,7 @@ type GitUpdates = {
 const updates = new AsyncLocalStorage<GitUpdates>();
 
 function git(cwd: string, args: string[]): string {
-  const result = Bun.spawnSync(['git', '--literal-pathspecs', '-C', cwd, ...args]);
+  const result = Bun.spawnSync(['git', '--literal-pathspecs', '-C', cwd, ...args], { env: process.env });
   if (result.exitCode !== 0) {
     throw new EnvManagerError(
       `Git update failed: ${result.stderr.toString().trim()}`
@@ -22,7 +22,7 @@ function git(cwd: string, args: string[]): string {
 }
 
 function snapshot(cwd: string): GitUpdates | undefined {
-  const result = Bun.spawnSync(['git', '-C', cwd, 'rev-parse', '--show-toplevel']);
+  const result = Bun.spawnSync(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { env: process.env });
   if (result.exitCode !== 0) return;
   const root = result.stdout.toString().trimEnd();
   const states: GitUpdates['states'] = new Map();

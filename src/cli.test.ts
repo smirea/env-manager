@@ -33,7 +33,7 @@ function run(cwd: string, cli: string, ...args: string[]) {
 }
 
 function git(cwd: string, ...args: string[]) {
-  const result = Bun.spawnSync(['git', '-C', cwd, ...args]);
+  const result = Bun.spawnSync(['git', '-C', cwd, ...args], { env: process.env });
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   return result.stdout.toString();
 }

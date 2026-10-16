@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { withGitUpdates, writeManagedFile } from './git-updates';
 
 function git(dir: string, ...args: string[]): string {
-  const result = Bun.spawnSync(['git', '-C', dir, ...args]);
+  const result = Bun.spawnSync(['git', '-C', dir, ...args], { env: process.env });
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   return result.stdout.toString().trimEnd();
 }
@@ -108,7 +108,7 @@ describe('Git updates', () => {
       await writeFile(join(subdir, '.env'), '# env-manager values.format: ts\n');
       git(dir, 'add', 'project/.env');
       git(dir, 'commit', '-m', 'schema');
-      const result = Bun.spawnSync([process.execPath, cli, 'set', 'values.format', 'swift'], { cwd: subdir });
+      const result = Bun.spawnSync([process.execPath, cli, 'set', 'values.format', 'swift'], { cwd: subdir, env: process.env });
       expect(result.exitCode).toBe(0);
       expect(git(dir, 'log', '-1', '--format=%s')).toBe('chore: env manager update');
       expect(git(dir, 'show', 'HEAD:project/.env')).toContain('values.format: swift');
