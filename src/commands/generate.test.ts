@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateCommand, syncOutputs } from './generate';
@@ -27,7 +27,7 @@ describe('generate command', () => {
       );
 
       const output = await readFile(path.join(dir, 'env.ts'), 'utf8');
-      expect(output).toContain('FOO: z.string().optional(),');
+      expect(output).toContain('FOO: optional(z.string()),');
       expect(output).not.toContain('.default(');
     });
   });
@@ -54,8 +54,8 @@ describe('generate command', () => {
       const output = await readFile(path.join(dir, 'env.ts'), 'utf8');
       expect(output).toContain('const env = z.object({');
       expect(output).toContain('CALLBACK: z.url(),');
-      expect(output).toContain('ADMIN: z.email().optional(),');
-      expect(output).toContain('DEBUG: z.stringbool().optional(),');
+      expect(output).toContain('ADMIN: optional(z.email()),');
+      expect(output).toContain('DEBUG: optional(z.stringbool()),');
       expect(output).toContain('}).parse(process.env);');
       expect(output).toContain('export default env;');
       expect(output).not.toContain('envSchema');
@@ -64,6 +64,20 @@ describe('generate command', () => {
       expect(output).not.toContain('readEnv');
       expect(output).not.toContain('getEnvVar');
       expect(output).not.toContain('setEnvVar');
+    });
+  });
+
+  test('generated reader treats empty optional values as unset', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n\nCALLBACK= # {optional url}\nDEBUG= # {optional bool}\nNAME= # {string}\n');
+      await generateCommand({ project: 'test-project', cwd: dir }, 'env.ts');
+      await symlink(path.resolve(import.meta.dir, '../../node_modules'), path.join(dir, 'node_modules'));
+      const result = Bun.spawnSync([process.execPath, '-e', "console.log(JSON.stringify((await import('./env.ts')).default))"], {
+        cwd: dir,
+        env: { PATH: process.env.PATH, CALLBACK: '', DEBUG: '', NAME: '' },
+      });
+      expect(result.stderr.toString()).toBe('');
+      expect(JSON.parse(result.stdout.toString())).toEqual({ NAME: '' });
     });
   });
 
