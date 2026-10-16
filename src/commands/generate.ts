@@ -4,8 +4,8 @@ import { mkdir } from 'node:fs/promises';
 import { configError, parseRootConfig, relativeOutput, schemaForTarget, upsertSetting, type RootConfig } from '../config';
 import { preflightPaths, type OutputPath } from '../output-paths';
 import { resolveEnvironment, upsertEnvironmentInContent } from '../environment';
-import { generateLocalEnvContent } from '../parser';
-import type { CommandContext, EnvVarSchema, OutputVersions } from '../types';
+import { generateLocalEnvContent, parseEnvValues } from '../parser';
+import type { CommandContext, EnvValues, EnvVarSchema, OutputVersions } from '../types';
 import { formatPrefixedHeader, hashContent, parseVersionRecord, readFileVersion, resolveVersion, upsertSourceMetadata, type CommentPrefix } from '../versions';
 import { EnvManagerError } from '../types';
 import { generateSwiftValuesContent, readValuesForConfig, resolveValuesConfig, type ValuesConfig } from '../values-config';
@@ -124,6 +124,29 @@ function renderOutput(ctx: CommandContext, output: PlannedOutput, values: Record
   return upsertEnvironmentInContent(content ? `${formatPrefixedHeader('#', ctx.project, null)}\n\n${content}` : `${formatPrefixedHeader('#', ctx.project, null)}\n`, environment);
 }
 
+export const OVERRIDE_FILE = '.env.override';
+
+// Overrides only reach target children: the root values file is what `up` uploads,
+// so worktree-local values like ports must never be written there.
+async function readOverrides(ctx: CommandContext, plan: GenerationPlan): Promise<EnvValues> {
+  const path = join(ctx.cwd, OVERRIDE_FILE);
+  const file = Bun.file(path);
+  if (!(await file.exists())) return {};
+  if (!plan.config.targets.length) configError(path, 1, `${OVERRIDE_FILE} only applies to target outputs. Edit ${plan.valuesConfig.path} directly in a single-project setup.`);
+  const content = await file.text();
+  const overrides = parseEnvValues(content);
+  const lines = content.split('\n');
+  for (const [name, value] of Object.entries(overrides)) {
+    const line = lines.findIndex(l => new RegExp(`^\\s*(export\\s+)?${name}\\s*=`).test(l)) + 1;
+    const entry = plan.config.schema.find(e => e.name === name);
+    if (!entry) configError(path, line, `Unknown variable ${name}. Overrides must be declared in .env.`);
+    if (value === '') continue;
+    const result = validateEnv([entry], { [name]: value });
+    if (!result.valid) configError(path, line, `Invalid value for ${name}: ${result.errors[0].message}`);
+  }
+  return overrides;
+}
+
 type MaterializeOptions = { target?: string; remote?: OutputVersions; readers?: boolean; createSource?: boolean };
 
 // Each output's version only moves when its rendered content changes, and a file is
@@ -139,6 +162,7 @@ export async function materializePlan(ctx: CommandContext, plan: GenerationPlan,
       if (!result.valid) configError(join(ctx.cwd, plan.valuesConfig.path), 1, `Invalid value for ${entry.name}: ${result.errors[0].message}`);
     }
   }
+  const childValues = { ...values, ...await readOverrides(ctx, plan) };
   const source = plan.outputs.find(o => o.source)!;
   const sourceFile = Bun.file(source.path);
   const sourceExists = await sourceFile.exists();
@@ -155,7 +179,8 @@ export async function materializePlan(ctx: CommandContext, plan: GenerationPlan,
     if (output.kind === 'reader' && options.readers === false) continue;
     const key = relative(ctx.cwd, output.path);
     const selectedValues: Record<string, string> = {};
-    for (const entry of output.schema) selectedValues[entry.name] = values[entry.name] ?? entry.defaultValue ?? '';
+    const pool = output.source ? values : childValues;
+    for (const entry of output.schema) selectedValues[entry.name] = pool[entry.name] ?? entry.defaultValue ?? '';
     const file = Bun.file(output.path);
     const existing = output.source ? sourceContent : await file.exists() ? await file.text() : null;
     const fileVersion = existing === null ? null : readFileVersion(existing);

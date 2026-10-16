@@ -284,4 +284,56 @@ describe('generate command', () => {
       expect(await read('client/.env.local')).toContain('# env-manager env: production');
     });
   });
+
+  describe('.env.override', () => {
+    const MONOREPO = [
+      '# env-manager: test-project',
+      '# env-manager target: client format=ts path=.env.local',
+      '# env-manager targets: client',
+      'PORT=3000 # {int:min(1)}',
+      'HOST= # {optional string}',
+      '',
+    ].join('\n');
+
+    test('applies to target outputs but never to the root values file', async () => {
+      await withTempDir(async (dir) => {
+        const ctx = { project: 'test-project', cwd: dir };
+        const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+        await writeFile(path.join(dir, '.env'), MONOREPO);
+        await writeFile(path.join(dir, '.env.local'), 'PORT=3000\n');
+        await writeFile(path.join(dir, '.env.override'), 'PORT=4100\nHOST=wt.localhost\n');
+        await generateCommand(ctx);
+        expect(await read('client/.env.local')).toContain("PORT=4100 # {int:min(1)}");
+        expect(await read('client/.env.local')).toContain("HOST='wt.localhost'");
+        expect(await read('.env.local')).toContain('PORT=3000\n');
+        expect(await read('.env.local')).not.toContain('4100');
+
+        const child = await read('client/.env.local');
+        await generateCommand(ctx);
+        expect(await read('client/.env.local')).toBe(child);
+
+        await writeFile(path.join(dir, '.env.override'), 'PORT=4200\n');
+        await generateCommand(ctx);
+        expect(await read('client/.env.local')).toContain('PORT=4200 ');
+      });
+    });
+
+    test('rejects unknown keys, invalid values, and single-project setups', async () => {
+      await withTempDir(async (dir) => {
+        const ctx = { project: 'test-project', cwd: dir };
+        await writeFile(path.join(dir, '.env'), MONOREPO);
+        await writeFile(path.join(dir, '.env.local'), 'PORT=3000\n');
+        const overridePath = path.join(dir, '.env.override');
+        await writeFile(overridePath, 'PORT=4100\nPROT=1\n');
+        await expect(generateCommand(ctx)).rejects.toThrow(`${overridePath}:2: Unknown variable PROT. Overrides must be declared in .env.`);
+        await writeFile(overridePath, 'PORT=0\n');
+        await expect(generateCommand(ctx)).rejects.toThrow(`${overridePath}:1: Invalid value for PORT`);
+        expect(await Bun.file(path.join(dir, 'client/.env.local')).exists()).toBe(false);
+
+        await writeFile(path.join(dir, '.env'), ENV_CONTENT);
+        await writeFile(overridePath, 'FOO=x\n');
+        await expect(generateCommand(ctx, 'env.ts')).rejects.toThrow(`${overridePath}:1: .env.override only applies to target outputs. Edit .env.local directly in a single-project setup.`);
+      });
+    });
+  });
 });

@@ -207,6 +207,23 @@ Git-ignore the root `.env.local` and generated target values files. Readers can
 be committed. Child values include only selected variables; readers include
 only their schema and never contain secret values.
 
+### Local overrides
+
+A git-ignored `.env.override` next to the root `.env` pins values for this
+checkout only, such as per-worktree ports:
+
+```bash
+CLIENT_PORT=6220
+API_PORT=6221
+API_URL=http://127.0.0.1:6221
+```
+
+Overrides are applied on top of the root values whenever target child outputs
+are generated, so they survive `gen` and `down`. They never touch the root values
+file, so `up` never uploads them. Every key must be declared in `.env` and pass
+its type, and `.env.override` is rejected in single-project setups, where you
+edit the values file directly.
+
 Every child output identifies its owner with metadata (use `//` comments in
 TypeScript and xcconfig):
 
@@ -537,6 +554,7 @@ environment. Existing single-environment secrets are treated as `local`.
 |------|---------|
 | `.env` | Schema, defaults, and env-manager config (committed to git) |
 | `.env.local` | Default `ts` values file and non-`ts` environment selector |
+| `.env.override` | Checkout-local overrides applied to target child outputs (git-ignored) |
 | `Config/LocalSecrets.xcconfig` | Common Swift/Xcode values file |
 | `src/env.ts` | Generated typed env access for `ts` mode |
 

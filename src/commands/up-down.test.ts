@@ -126,4 +126,24 @@ describe('output versions', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('overrides survive down and never reach AWS', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-override-'));
+    try {
+      const ctx = { project: 'mono', cwd: dir };
+      await writeFile(path.join(dir, 'package.json'), '{}\n');
+      await writeFile(path.join(dir, '.env'), '# env-manager: mono\n# env-manager target: web format=ts path=.env.local\n# env-manager targets: web\nPORT=3000 # {int}\n');
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: local\nPORT=3000\n');
+      await writeFile(path.join(dir, '.env.override'), 'PORT=4100\n');
+
+      await upCommand(ctx);
+      expect(secrets.get('env-manager/mono')?.environments?.local.values).not.toContain('4100');
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: local\nPORT=9999\n');
+      await downCommand(ctx);
+      expect(await readFile(path.join(dir, '.env.local'), 'utf8')).toContain('PORT=3000');
+      expect(await readFile(path.join(dir, 'web/.env.local'), 'utf8')).toContain('PORT=4100 ');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
