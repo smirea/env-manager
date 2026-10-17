@@ -147,10 +147,21 @@ async function readOverrides(ctx: CommandContext, plan: GenerationPlan): Promise
   return overrides;
 }
 
+// Formatters only touch whitespace, quotes, semicolons, commas and parens, so a reader
+// that still differs after dropping those was edited by hand and must be rewritten.
+function codeFingerprint(content: string): string {
+  return content.replace(/[\s'"`;,()]/g, '');
+}
+
+function drifted(output: PlannedOutput, existing: string, rendered: string): boolean {
+  return output.kind === 'reader' && codeFingerprint(existing) !== codeFingerprint(rendered);
+}
+
 type MaterializeOptions = { target?: string; remote?: OutputVersions; readers?: boolean; createSource?: boolean };
 
-// Each output's version only moves when its rendered content changes, and a file is
-// rewritten only when its version is lower, so formatter-only edits survive reruns.
+// Each output's version only moves when its rendered content changes. A file is rewritten
+// when its version is lower or a reader's code drifted from the render, so formatter-only
+// edits survive reruns but hand-edited readers heal.
 export async function materializePlan(ctx: CommandContext, plan: GenerationPlan, options: MaterializeOptions = {}): Promise<OutputVersions> {
   if (options.target && !plan.config.targets.some(t => t.name === options.target)) configError(join(ctx.cwd, '.env'), 1, `Unknown target "${options.target}".`);
   const values = await readValuesForConfig(ctx, plan.valuesConfig);
@@ -184,12 +195,14 @@ export async function materializePlan(ctx: CommandContext, plan: GenerationPlan,
     const file = Bun.file(output.path);
     const existing = output.source ? sourceContent : await file.exists() ? await file.text() : null;
     const fileVersion = existing === null ? null : readFileVersion(existing);
+    const renderedAtFileVersion = renderOutput(ctx, output, selectedValues, environment, fileVersion);
     const entry = resolveVersion(key, hashContent(renderOutput(ctx, output, selectedValues, environment, null)), candidates, {
       version: fileVersion,
-      unchanged: !output.source && existing !== null && existing === renderOutput(ctx, output, selectedValues, environment, fileVersion),
+      unchanged: !output.source && existing !== null && existing === renderedAtFileVersion,
     });
     record[key] = entry;
-    if (output.source || (fileVersion !== null && fileVersion >= entry.version)) continue;
+    if (output.source) continue;
+    if (existing !== null && fileVersion !== null && fileVersion >= entry.version && !drifted(output, existing, renderedAtFileVersion)) continue;
     await mkdir(dirname(output.path), { recursive: true });
     if (await writeManagedFile(output.path, renderOutput(ctx, output, selectedValues, environment, entry.version))) {
       console.log(`Generated ${key}`);

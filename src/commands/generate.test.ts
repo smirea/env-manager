@@ -222,6 +222,11 @@ describe('generate command', () => {
       expect(await read('env.ts')).toBe(formatted);
       expect(await read('.env.local')).toBe(local);
 
+      await writeFile(path.join(dir, 'env.ts'), formatted.replace('z.string()', 'z.url()'));
+      await generateCommand(ctx);
+      expect(await read('env.ts')).toBe(reader);
+      expect(await read('.env.local')).toBe(local);
+
       await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager ts: env.ts\n\nFOO=bar # {string}\nBAR=1 # {int}\n');
       await generateCommand(ctx);
       const regenerated = await read('env.ts');

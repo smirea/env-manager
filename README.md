@@ -483,8 +483,11 @@ target child, and each reader. The version sits at the end of the file's header
 (`| vN`).
 
 An output's version increments only when the content env-manager would write for
-it changes. A file is rewritten only when its version is lower than the known
-version, so formatter-only edits to generated files survive later runs. AWS
+it changes. A file is rewritten when its version is lower than the known
+version, so formatter-only edits to generated files survive later runs. Readers
+are also rewritten when their code no longer matches what env-manager would
+write, ignoring whitespace, quotes, semicolons, commas, and parentheses, so hand
+edits to a reader are reverted. AWS
 stores each environment's output versions with a content hash and date. The root
 values file mirrors them as `# env-manager output: <path> vN <hash>` lines, which
 lets `generate` work offline. No dates are written into files. `up` skips the
