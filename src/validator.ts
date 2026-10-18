@@ -6,6 +6,7 @@ import type {
   Validator,
 } from "./types";
 import { EnvManagerError } from "./types";
+import { NUMERIC_VALUE_PATTERN } from "./parser";
 
 export function coerceValue(
   value: string,
@@ -29,7 +30,7 @@ export function coerceValue(
       return n;
     }
     case "float": {
-      if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(trimmed)) {
+      if (!NUMERIC_VALUE_PATTERN.test(trimmed)) {
         throw new EnvManagerError(`Cannot parse "${value}" as float`);
       }
       const n = Number(trimmed);
@@ -47,59 +48,23 @@ export function coerceValue(
   }
 }
 
-export function runValidators(
+// The parser only attaches min/max to numeric types and format to strings.
+function runValidators(
   value: string | number | boolean,
   validators: Validator[],
   varName: string
 ): ValidationError | null {
   for (const v of validators) {
-    if (v.kind === "min") {
-      if (typeof value !== "number") {
-        return {
-          varName,
-          message: `min() validator requires numeric type`,
-          value: String(value),
-        };
-      }
-      if (value < v.value) {
-        return {
-          varName,
-          message: `Value ${value} is less than min(${v.value})`,
-          value: String(value),
-        };
-      }
-    } else if (v.kind === "max") {
-      if (typeof value !== "number") {
-        return {
-          varName,
-          message: `max() validator requires numeric type`,
-          value: String(value),
-        };
-      }
-      if (value > v.value) {
-        return {
-          varName,
-          message: `Value ${value} is greater than max(${v.value})`,
-          value: String(value),
-        };
-      }
-    } else if (v.kind === "format") {
-      if (typeof value !== "string") {
-        return {
-          varName,
-          message: `format() validator requires string type`,
-          value: String(value),
-        };
-      }
-      if (v.pattern.global || v.pattern.sticky) {
-        v.pattern.lastIndex = 0;
-      }
-      if (!v.pattern.test(value)) {
-        return {
-          varName,
-          message: `Value "${value}" does not match pattern ${v.pattern}`,
-          value,
-        };
+    if (v.kind === "min" && (value as number) < v.value) {
+      return { varName, message: `Value ${value} is less than min(${v.value})`, value: String(value) };
+    }
+    if (v.kind === "max" && (value as number) > v.value) {
+      return { varName, message: `Value ${value} is greater than max(${v.value})`, value: String(value) };
+    }
+    if (v.kind === "format") {
+      v.pattern.lastIndex = 0;
+      if (!v.pattern.test(value as string)) {
+        return { varName, message: `Value "${value}" does not match pattern ${v.pattern}`, value: String(value) };
       }
     }
   }

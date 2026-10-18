@@ -10,7 +10,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadEnvFromPaths, loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
+import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-env-loader-'));
@@ -23,13 +23,13 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('env loader', () => {
-  test('loadOwnEnvFromPaths overrides preloaded env while keeping .env.local precedence', async () => {
+  test('loadOwnEnv overrides preloaded env while keeping .env.local precedence and skipping empty placeholders', async () => {
     await withTempDir(async (dir) => {
       const packageRoot = path.join(dir, 'env-manager');
       await mkdir(packageRoot, { recursive: true });
       await writeFile(
         path.join(packageRoot, '.env'),
-        'AWS_REGION=from-dot-env\nSHARED_KEY=from-dot-env\n'
+        'AWS_REGION=from-dot-env\nSHARED_KEY=from-dot-env\nAWS_SECRET_ACCESS_KEY= # {string}\n'
       );
       await writeFile(
         path.join(packageRoot, '.env.local'),
@@ -39,39 +39,25 @@ describe('env loader', () => {
       const previousRegion = process.env.AWS_REGION;
       const previousSharedKey = process.env.SHARED_KEY;
       const previousAccessKey = process.env.AWS_ACCESS_KEY_ID;
+      const previousSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
 
       process.env.AWS_REGION = 'from-cwd';
       process.env.SHARED_KEY = 'from-cwd';
       process.env.AWS_ACCESS_KEY_ID = 'from-cwd';
+      process.env.AWS_SECRET_ACCESS_KEY = 'from-shell';
 
       try {
-        loadOwnEnvFromPaths([packageRoot]);
+        loadOwnEnv(packageRoot);
 
         expect(process.env.AWS_REGION).toBe('from-dot-env-local');
         expect(process.env.SHARED_KEY).toBe('from-dot-env');
         expect(process.env.AWS_ACCESS_KEY_ID).toBe('own-access-key');
+        expect(process.env.AWS_SECRET_ACCESS_KEY).toBe('from-shell');
       } finally {
         restoreEnvVar('AWS_REGION', previousRegion);
         restoreEnvVar('SHARED_KEY', previousSharedKey);
         restoreEnvVar('AWS_ACCESS_KEY_ID', previousAccessKey);
-      }
-    });
-  });
-
-  test('loadEnvFromPaths does not override existing process env', async () => {
-    await withTempDir(async (dir) => {
-      const packageRoot = path.join(dir, 'env-manager');
-      await mkdir(packageRoot, { recursive: true });
-      await writeFile(path.join(packageRoot, '.env'), 'AWS_REGION=from-dot-env\n');
-
-      const previousRegion = process.env.AWS_REGION;
-      process.env.AWS_REGION = 'preloaded';
-
-      try {
-        loadEnvFromPaths([packageRoot]);
-        expect(process.env.AWS_REGION).toBe('preloaded');
-      } finally {
-        restoreEnvVar('AWS_REGION', previousRegion);
+        restoreEnvVar('AWS_SECRET_ACCESS_KEY', previousSecretKey);
       }
     });
   });
@@ -90,9 +76,7 @@ describe('env loader', () => {
       await writeFile(modulePath, '');
 
       const realPackageRoot = await realpath(packageRoot);
-      expect(resolveOwnEnvPaths(pathToFileURL(modulePath).href)).toEqual([
-        realPackageRoot,
-      ]);
+      expect(resolveOwnPackageRoot(pathToFileURL(modulePath).href)).toBe(realPackageRoot);
     });
   });
 
@@ -112,9 +96,7 @@ describe('env loader', () => {
       await symlink(modulePath, symlinkPath);
 
       const realPackageRoot = await realpath(packageRoot);
-      expect(resolveOwnEnvPaths(pathToFileURL(symlinkPath).href)).toEqual([
-        realPackageRoot,
-      ]);
+      expect(resolveOwnPackageRoot(pathToFileURL(symlinkPath).href)).toBe(realPackageRoot);
     });
   });
 });

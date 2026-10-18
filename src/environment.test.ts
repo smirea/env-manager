@@ -7,7 +7,6 @@ import {
   parseEnvironmentComment,
   removeEnvironmentFromContent,
   resolveEnvironment,
-  resolveEnvironmentFromContent,
   upsertEnvironmentInContent,
   validateEnvironmentName,
 } from './environment';
@@ -22,15 +21,6 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('environment metadata', () => {
-  test('defaults to local when no env comment exists', () => {
-    expect(
-      resolveEnvironmentFromContent(`# env-manager: demo | 2026-01-01T00:00:00Z
-
-FOO=bar # {string}
-`)
-    ).toBe(DEFAULT_ENVIRONMENT);
-  });
-
   test('parses an env comment', () => {
     expect(parseEnvironmentComment('# env-manager env: staging')).toBe(
       'staging'

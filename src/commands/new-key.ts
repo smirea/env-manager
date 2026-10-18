@@ -2,24 +2,18 @@ import { parseRootConfig, configError } from '../config';
 import { planGeneration } from './generate';
 import { upCommand } from './up';
 import { writeManagedFile } from '../git-updates';
-import { createAwsAdapter, secretName } from "../aws";
+import { createAwsAdapter } from "../aws";
 import {
   resolveEnvironment,
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
-import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
+import { GLOBAL_LABEL } from "../global";
+import { readGlobalValues, saveGlobalValue } from "./global";
 import { getKey, listKeys, listKeyNames } from "../keys";
 import type { KeyResolveOptions } from "../keys";
 import { OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD } from "../keys/openrouter";
 import { promptLine } from "../prompt";
-import {
-  appendSchemaEntry,
-  envValuesEqual,
-  parseEnvFile,
-  parseEnvValues,
-  serializeEnvValues,
-  upsertHeaderVersion,
-} from "../parser";
+import { appendSchemaEntry, parseEnvFile } from "../parser";
 import type { CommandContext } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
@@ -131,71 +125,6 @@ export function listKeysCommand(): void {
   }
 }
 
-async function getGlobalValue(
-  aws: ReturnType<typeof createAwsAdapter>,
-  keyName: string
-): Promise<string | null> {
-  const secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
-  if (!secret?.values) return null;
-
-  const values = parseEnvValues(secret.values);
-  return values[keyName] ?? null;
-}
-
-async function saveToGlobal(
-  aws: ReturnType<typeof createAwsAdapter>,
-  keyName: string,
-  keyValue: string,
-  schemaType: string,
-  location?: string
-): Promise<void> {
-  let secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
-
-  const now = new Date().toISOString();
-
-  if (!secret) {
-    const header = `# env-manager: ${GLOBAL_PROJECT}\n\n`;
-    const locations = location ? { [keyName]: location } : undefined;
-    secret = {
-      schema: header + `${keyName}= # {${schemaType}}\n`,
-      values: `${keyName}=${keyValue}`,
-      syncDate: now,
-      locations,
-    };
-  } else {
-    let schema = secret.schema;
-    let parsed = parseEnvFile(schema);
-    if (!parsed.header) {
-      schema = upsertHeaderVersion(schema, GLOBAL_PROJECT, null);
-      parsed = parseEnvFile(schema);
-    }
-    const existsInSchema = parsed.schema.some((s) => s.name === keyName);
-    if (!existsInSchema) {
-      schema = appendSchemaEntry(schema, keyName, schemaType);
-    }
-
-    const values = parseEnvValues(secret.values ?? '');
-    const previousValues = { ...values };
-    values[keyName] = keyValue;
-    const valuesChanged = !envValuesEqual(values, previousValues);
-
-    const locations = { ...secret.locations };
-    if (location) {
-      locations[keyName] = location;
-    }
-
-    secret = {
-      schema,
-      values: serializeEnvValues(values),
-      syncDate: valuesChanged ? now : secret.syncDate,
-      files: secret.files,
-      locations: Object.keys(locations).length > 0 ? locations : undefined,
-    };
-  }
-
-  await aws.putSecret(secretName(GLOBAL_PROJECT), secret);
-}
-
 export async function newKeyCommand(
   ctx: CommandContext,
   keyName: string,
@@ -271,7 +200,7 @@ export async function newKeyCommand(
 
   await planGeneration(ctx, envContent);
   const aws = createAwsAdapter();
-  const globalValue = await getGlobalValue(aws, keyName);
+  const globalValue = (await readGlobalValues(aws))[keyName] ?? null;
 
   let key: string;
 
@@ -312,16 +241,11 @@ export async function newKeyCommand(
   }
 
   const localValues = await readValuesForConfig(ctx, valuesConfig);
-  const previousLocalValues = { ...localValues };
+  const localValuesChanged = localValues[keyName] !== key;
   localValues[keyName] = key;
   const updatedParsed = parseEnvFile(envContent);
-  const localValuesChanged = !envValuesEqual(localValues, previousLocalValues);
-
-  const values = localValues;
-  const result = validateEnv(updatedParsed.schema, values);
-  assertValid(result);
-
-  await collectFilePayload(updatedParsed.schema, values, ctx.cwd);
+  assertValid(validateEnv(updatedParsed.schema, localValues));
+  await collectFilePayload(updatedParsed.schema, localValues, ctx.cwd);
 
   if (envContentChanged) {
     await writeManagedFile(envPath, envContent);
@@ -339,7 +263,7 @@ export async function newKeyCommand(
   await upCommand(ctx);
 
   if (!globalValue || key !== globalValue) {
-    await saveToGlobal(aws, keyName, key, keyDef.schemaType, ctx.project);
+    await saveGlobalValue(aws, keyName, key, keyDef.schemaType, ctx.project);
     console.log(`Saved ${keyName} to ${GLOBAL_LABEL}`);
   }
 

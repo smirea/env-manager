@@ -1,15 +1,14 @@
-import { createAwsAdapter, secretName } from "../aws";
+import { createAwsAdapter, secretName, type AwsAdapter } from "../aws";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
 import {
   appendSchemaEntry,
-  envValuesEqual,
   generateEnvContent,
   parseEnvFile,
   parseEnvValues,
   serializeEnvValues,
   upsertHeaderVersion,
 } from "../parser";
-import type { CommandContext, SecretPayload } from "../types";
+import type { EnvValues, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -93,57 +92,55 @@ function collectGlobalEntries(secret: SecretPayload | null): GlobalEntry[] {
     }));
 }
 
-export async function globalSetCommand(
-  _ctx: CommandContext,
-  input: { name: string; value: string; location?: string }
+export async function readGlobalValues(aws: AwsAdapter): Promise<EnvValues> {
+  const secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
+  return secret?.values ? parseEnvValues(secret.values) : {};
+}
+
+export async function saveGlobalValue(
+  aws: AwsAdapter,
+  name: string,
+  value: string,
+  schemaType: string,
+  location?: string
 ): Promise<void> {
+  const existing = await aws.getSecret(secretName(GLOBAL_PROJECT));
+  let schema = ensureGlobalSchema(existing?.schema ?? "");
+  if (!parseEnvFile(schema).schema.some((s) => s.name === name)) {
+    schema = appendSchemaEntry(schema, name, schemaType);
+  }
+  const values = parseEnvValues(existing?.values ?? "");
+  const now = new Date().toISOString();
+  const syncDate = values[name] === value ? existing?.syncDate ?? now : now;
+  values[name] = value;
+  const locations = { ...existing?.locations, ...(location ? { [name]: location } : {}) };
+
+  await aws.putSecret(secretName(GLOBAL_PROJECT), {
+    schema,
+    values: serializeEnvValues(values),
+    syncDate,
+    files: existing?.files,
+    locations: Object.keys(locations).length > 0 ? locations : undefined,
+  });
+}
+
+export async function globalSetCommand(input: {
+  name: string;
+  value: string;
+  location?: string;
+}): Promise<void> {
   const name = input.name.trim();
   const value = input.value.trim();
-  const location = input.location?.trim() ?? "";
-
   if (!name || !value) {
     throw new EnvManagerError("Name and value are required.");
   }
-
   ensureValidName(name);
 
-  const aws = createAwsAdapter();
-  const now = new Date().toISOString();
-  const existing = await aws.getSecret(secretName(GLOBAL_PROJECT));
-
-  let schema = ensureGlobalSchema(existing?.schema ?? "");
-  const parsed = parseEnvFile(schema);
-  const existsInSchema = parsed.schema.some((s) => s.name === name);
-  if (!existsInSchema) {
-    schema = appendSchemaEntry(schema, name, "string");
-  }
-
-  const values = parseEnvValues(existing?.values ?? "");
-  const previousValues = { ...values };
-  values[name] = value;
-  const valuesChanged = !envValuesEqual(values, previousValues);
-
-  const locations = { ...existing?.locations };
-  if (location !== "") {
-    locations[name] = location;
-  }
-
-  const payload: SecretPayload = {
-    schema,
-    values: serializeEnvValues(values),
-    syncDate: valuesChanged ? now : existing?.syncDate ?? now,
-    files: existing?.files,
-    locations,
-  };
-
-  await aws.putSecret(secretName(GLOBAL_PROJECT), payload);
+  await saveGlobalValue(createAwsAdapter(), name, value, "string", input.location?.trim());
   console.log(`Saved ${name} to ${GLOBAL_LABEL}`);
 }
 
-export async function globalGetCommand(
-  _ctx: CommandContext,
-  keyName?: string
-): Promise<void> {
+export async function globalGetCommand(keyName?: string): Promise<void> {
   const name = keyName ? keyName.trim() : await promptRequired("Name");
   ensureValidName(name);
 
@@ -163,7 +160,7 @@ export async function globalGetCommand(
   console.log(output);
 }
 
-export async function globalListCommand(_ctx: CommandContext): Promise<void> {
+export async function globalListCommand(): Promise<void> {
   const aws = createAwsAdapter();
   const secret = await aws.getSecret(secretName(GLOBAL_PROJECT));
   const entries = collectGlobalEntries(secret);
@@ -176,10 +173,7 @@ export async function globalListCommand(_ctx: CommandContext): Promise<void> {
   console.log(formatTable(entries));
 }
 
-export async function globalRmCommand(
-  _ctx: CommandContext,
-  name: string
-): Promise<void> {
+export async function globalRmCommand(name: string): Promise<void> {
   const trimmed = name.trim();
   ensureValidName(trimmed);
 

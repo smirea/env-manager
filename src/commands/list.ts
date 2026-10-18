@@ -1,6 +1,7 @@
-import { createAwsAdapter, secretName } from "../aws";
+import { createAwsAdapter } from "../aws";
 import { GLOBAL_PROJECT } from "../global";
-import { parseEnvValues } from "../parser";
+import { readGlobalValues } from "./global";
+
 export async function listCommand(): Promise<void> {
   const aws = createAwsAdapter();
   const secrets = await aws.listSecrets("env-manager/");
@@ -18,11 +19,7 @@ export async function listCommand(): Promise<void> {
     }
   }
 
-  const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
-  const globalValues = globalSecret?.values
-    ? parseEnvValues(globalSecret.values)
-    : {};
-  const globalKeys = Object.keys(globalValues).sort();
+  const globalKeys = Object.keys(await readGlobalValues(aws)).sort();
 
   console.log("");
   console.log("Global defaults:");

@@ -1,11 +1,5 @@
-export type SchemaType =
-  | "string"
-  | "int"
-  | "float"
-  | "bool"
-  | "url"
-  | "email"
-  | "file";
+export const SCHEMA_TYPES = ["string", "int", "float", "bool", "url", "email", "file"] as const;
+export type SchemaType = (typeof SCHEMA_TYPES)[number];
 
 export type MinValidator = { kind: "min"; value: number };
 export type MaxValidator = { kind: "max"; value: number };

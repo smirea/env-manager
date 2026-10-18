@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  envContentEqualIgnoringVersion,
   envValuesEqual,
   generateLocalEnvContent,
   parseEnvFile,
@@ -389,24 +388,6 @@ FOO=bar
 `);
   });
 
-  test("compares env content without treating the header version as structure", () => {
-    const first = `# env-manager: demo | 2025-01-01T00:00:00Z
-
-FOO=bar # {string}
-`;
-    const second = `# env-manager: demo | v7
-
-FOO=bar # {string}
-`;
-    const changed = `# env-manager: demo | v7
-
-FOO=bar # {string}
-PORT=3000 # {int}
-`;
-
-    expect(envContentEqualIgnoringVersion(first, second)).toBe(true);
-    expect(envContentEqualIgnoringVersion(first, changed)).toBe(false);
-  });
 });
 
 describe("generateLocalEnvContent", () => {
@@ -512,10 +493,17 @@ API_KEY='sk-test' # {string}
 });
 
 describe("env value helpers", () => {
-  test("serializes values and compares by key/value instead of order", () => {
-    expect(serializeEnvValues({ FOO: "one", BAR: "two" })).toBe(
-      "FOO=one\nBAR=two"
+  test("apostrophes inside unquoted values do not hide the inline schema", () => {
+    expect(parseEnvFile("NAME=O'Brien # {string}\n").schema[0]).toMatchObject({ name: "NAME", type: "string", defaultValue: "O'Brien" });
+    expect(parseEnvValues("NAME=O'Brien # note\n")).toEqual({ NAME: "O'Brien" });
+  });
+
+  test("serialized values survive a parse round trip and compare by key/value", () => {
+    const values = { PASS: "abc #def", QUOTED: "'x'", SPACED: " lead", PORT: "3000" };
+    expect(serializeEnvValues(values)).toBe(
+      "PASS='abc #def'\nQUOTED='\\'x\\''\nSPACED=' lead'\nPORT=3000"
     );
+    expect(parseEnvValues(serializeEnvValues(values))).toEqual(values);
     expect(
       envValuesEqual({ FOO: "one", BAR: "two" }, { BAR: "two", FOO: "one" })
     ).toBe(true);

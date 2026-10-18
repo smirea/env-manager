@@ -95,7 +95,7 @@ class AwsSdkAdapter implements AwsAdapter {
       try {
         return JSON.parse(result.SecretString) as SecretPayload;
       } catch {
-        throw new AwsError(`Failed to parse secret JSON: ${result.SecretString}`);
+        throw new AwsError(`Secret ${name} is not valid JSON.`);
       }
     } catch (error) {
       if (isResourceNotFound(error)) return null;
@@ -105,23 +105,12 @@ class AwsSdkAdapter implements AwsAdapter {
 
   async putSecret(name: string, payload: SecretPayload): Promise<void> {
     const json = JSON.stringify(payload);
-    const existing = await this.getSecret(name);
-
     try {
-      if (existing) {
-        await this.secrets.send(
-          new PutSecretValueCommand({
-            SecretId: name,
-            SecretString: json,
-          })
-        );
-      } else {
-        await this.secrets.send(
-          new CreateSecretCommand({
-            Name: name,
-            SecretString: json,
-          })
-        );
+      try {
+        await this.secrets.send(new PutSecretValueCommand({ SecretId: name, SecretString: json }));
+      } catch (error) {
+        if (!isResourceNotFound(error)) throw error;
+        await this.secrets.send(new CreateSecretCommand({ Name: name, SecretString: json }));
       }
     } catch (error) {
       throw new AwsError(`Failed to save secret: ${formatAwsError(error)}`);

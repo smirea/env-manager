@@ -6,7 +6,6 @@ import {
 } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import {
-  envContentEqualIgnoringVersion,
   envValuesEqual,
   parseEnvFile,
   parseEnvValues,
@@ -21,11 +20,7 @@ import {
 import type { CommandContext, SecretPayload } from "../types";
 import { EnvManagerError } from "../types";
 import { assertValid, validateEnv } from "../validator";
-import {
-  parseSwiftValues,
-  resolveValuesConfig,
-  resolveValuesOutputPath,
-} from "../values-config";
+import { readValuesForConfig, resolveValuesConfig } from "../values-config";
 import { versionRecordsEqual } from "../versions";
 
 export async function upCommand(ctx: CommandContext): Promise<void> {
@@ -39,12 +34,6 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   let envContent = await envFile.text();
   let envContentChanged = false;
   let parsed = parseEnvFile(envContent);
-
-  if (parsed.header && parsed.header.project !== ctx.project) {
-    throw new EnvManagerError(
-      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
-    );
-  }
 
   await planGeneration(ctx, envContent);
   const aws = createAwsAdapter();
@@ -71,20 +60,8 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     parsed = parseEnvFile(envContent);
   }
 
-  let values: Record<string, string> = {};
-  const valuesPath = resolveValuesOutputPath(ctx, valuesConfig);
-  const valuesFile = Bun.file(valuesPath);
-  const valuesFileExists = await valuesFile.exists();
-  if (valuesFileExists) {
-    const valuesContent = await valuesFile.text();
-    values =
-      valuesConfig.format === 'swift'
-        ? parseSwiftValues(valuesContent)
-        : parseEnvValues(valuesContent);
-  }
-
-  const result = validateEnv(parsed.schema, values);
-  assertValid(result);
+  const values = await readValuesForConfig(ctx, valuesConfig);
+  assertValid(validateEnv(parsed.schema, values));
 
   const files = await collectFilePayload(parsed.schema, values, ctx.cwd);
 
@@ -96,7 +73,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
 
   const schemaChanged =
     !existingProject ||
-    !envContentEqualIgnoringVersion(envContent, existingProject.schema);
+    envContent !== existingProject.schema;
   const remoteValues = parseEnvValues(existingEnvironment?.values ?? "");
   const valuesChanged =
     !existingEnvironment ||

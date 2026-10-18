@@ -1,4 +1,4 @@
-import { defaultValuesPath, parseRootConfig, upsertSetting } from '../config';
+import { defaultValuesPath, upsertSetting } from '../config';
 import { planGeneration } from './generate';
 import { pullEnvironment } from './down';
 import { writeManagedFile } from '../git-updates';
@@ -13,7 +13,6 @@ import { promptLine } from "../prompt";
 import type { CommandContext, EnvVarSchema } from "../types";
 import { EnvManagerError } from "../types";
 import {
-  createValuesConfig,
   readValuesForConfig,
   resolveValuesConfig,
   type ValuesConfig,
@@ -68,19 +67,6 @@ type CopyGlobalDefaultsParams = {
   localSchema: EnvVarSchema[];
   project: string;
 };
-
-function collectEnvVarNames(content: string): string[] {
-  const names = new Set<string>();
-  const values = parseEnvValues(content);
-  for (const name of Object.keys(values)) {
-    names.add(name);
-  }
-  const parsed = parseEnvFile(content);
-  for (const entry of parsed.schema) {
-    names.add(entry.name);
-  }
-  return Array.from(names);
-}
 
 async function copyGlobalDefaults({
   aws,
@@ -177,7 +163,7 @@ function getInitValuesConfig(options: InitOptions): ValuesConfig | null {
   if (!options.valuesFormat) throw new EnvManagerError('Use --values-format with --values-path.');
   const format = options.valuesFormat;
   if (format !== 'ts' && format !== 'swift') throw new EnvManagerError('Values format must be ts or swift.');
-  return createValuesConfig(format, options.valuesPath ?? defaultValuesPath(format));
+  return { format, path: options.valuesPath ?? defaultValuesPath(format) };
 }
 
 export async function initCommand(
@@ -222,21 +208,17 @@ export async function initCommand(
     if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
     if (initValuesConfig) envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
     await planGeneration(ctx, envContent);
-    if (envContent !== await envFile.text()) await writeManagedFile(envPath, envContent);
+    await writeManagedFile(envPath, envContent);
     console.log(`.env already exists at ${envPath}, skipping creation.`);
   }
 
-  let restrictToNames: Set<string> | null = null;
-  if (envAlreadyExists) {
-    const names = collectEnvVarNames(envContent);
-    restrictToNames = new Set(names);
-  } else {
+  const restrictToNames = envAlreadyExists ? new Set(Object.keys(parseEnvValues(envContent))) : null;
+  if (!envAlreadyExists) {
     envContent = TEMPLATE.replace("{{PROJECT}}", ctx.project);
     if (initValuesConfig) {
       envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
     }
     if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
-    parseRootConfig(envContent, envPath);
     await planGeneration(ctx, envContent);
     await writeManagedFile(envPath, envContent);
     console.log(`Created new .env template for project "${ctx.project}"`);

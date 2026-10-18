@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { writeManagedFile } from './git-updates';
 import { EnvManagerError } from './types';
 
@@ -39,10 +39,6 @@ export function findEnvironmentInContent(content: string): string | null {
   return null;
 }
 
-export function resolveEnvironmentFromContent(content: string): string {
-  return findEnvironmentInContent(content) ?? DEFAULT_ENVIRONMENT;
-}
-
 // An existing env in the values file wins over the one being moved out of .env.
 export async function moveEnvironmentToValuesFile(
   cwd: string,
@@ -62,7 +58,7 @@ export async function findEnvironment(
 ): Promise<string | null> {
   const candidates = new Set(options.valuesPath ? [options.valuesPath, '.env.local'] : ['.env.local']);
   for (const candidate of candidates) {
-    const localFile = Bun.file(candidate.startsWith('/') ? candidate : `${cwd}/${candidate}`);
+    const localFile = Bun.file(resolve(cwd, candidate));
     if (await localFile.exists()) return findEnvironmentInContent(await localFile.text());
   }
   return null;

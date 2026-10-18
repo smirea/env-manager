@@ -6,9 +6,11 @@ import type {
   SchemaType,
   Validator,
 } from "./types";
-import { ParseError } from "./types";
+import { ParseError, SCHEMA_TYPES } from "./types";
 
-const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+export const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+const SCHEMA_TYPE_PATTERN = new RegExp(`^(optional\\s+)?(${SCHEMA_TYPES.join("|")})(?::(.+))?$`);
+
 export function formatHeaderLine(header: EnvFileHeader): string {
   return `# env-manager: ${header.project}${header.version === null ? "" : ` | v${header.version}`}`;
 }
@@ -65,24 +67,15 @@ export function parseValidators(
     }
     if (end < offset || remaining[end] !== ')') throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
     const value = remaining.slice(offset, end);
-    if (kind === "min") {
+    if (kind === "min" || kind === "max") {
       if (type !== "int" && type !== "float") {
-        throw new ParseError(`min() is not valid for type ${type}`);
+        throw new ParseError(`${kind}() is not valid for type ${type}`);
       }
       const parsed = Number(value);
       if (!NUMERIC_VALUE_PATTERN.test(value.trim()) || !Number.isFinite(parsed)) {
-        throw new ParseError(`Invalid min() value: ${value}`);
+        throw new ParseError(`Invalid ${kind}() value: ${value}`);
       }
-      validators.push({ kind: "min", value: parsed });
-    } else if (kind === "max") {
-      if (type !== "int" && type !== "float") {
-        throw new ParseError(`max() is not valid for type ${type}`);
-      }
-      const parsed = Number(value);
-      if (!NUMERIC_VALUE_PATTERN.test(value.trim()) || !Number.isFinite(parsed)) {
-        throw new ParseError(`Invalid max() value: ${value}`);
-      }
-      validators.push({ kind: "max", value: parsed });
+      validators.push({ kind, value: parsed });
     } else if (kind === "format") {
       if (type !== "string") {
         throw new ParseError(`format() is not valid for type ${type}`);
@@ -115,9 +108,7 @@ export function parseSchemaComment(comment: string): {
   if (!match) return null;
 
   const inner = match[1].trim();
-  const typeMatch = inner.match(
-    /^(optional\s+)?(string|int|float|bool|url|email|file)(?::(.+))?$/
-  );
+  const typeMatch = inner.match(SCHEMA_TYPE_PATTERN);
   if (!typeMatch) return null;
 
   const optional = !!typeMatch[1];
@@ -165,25 +156,22 @@ function unescapeQuotedValue(value: string, quote: "'" | '"'): string {
   return result;
 }
 
+// Quotes only delimit a value when they open it, so apostrophes inside an unquoted
+// value like O'Brien do not swallow the inline schema comment.
 export function findInlineCommentIndex(value: string): number {
-  let inSingle = false;
-  let inDouble = false;
-
-  for (let i = 0; i < value.length; i++) {
-    const ch = value[i];
-    if (ch === "'" && !inDouble && !isEscaped(value, i)) {
-      inSingle = !inSingle;
-      continue;
-    }
-    if (ch === '"' && !inSingle && !isEscaped(value, i)) {
-      inDouble = !inDouble;
-      continue;
-    }
-    if (ch === "#" && !inSingle && !inDouble) {
-      if (i === 0 || /\s/.test(value[i - 1])) return i;
+  let from = value.length - value.trimStart().length;
+  const quote = value[from];
+  if (quote === "'" || quote === '"') {
+    for (let i = from + 1; i < value.length; i++) {
+      if (value[i] === quote && !isEscaped(value, i)) {
+        from = i + 1;
+        break;
+      }
     }
   }
-
+  for (let i = from; i < value.length; i++) {
+    if (value[i] === "#" && (i === 0 || /\s/.test(value[i - 1]))) return i;
+  }
   return -1;
 }
 
@@ -297,34 +285,10 @@ export function parseEnvFile(content: string): ParsedEnvFile {
 
 export function parseEnvValues(content: string): EnvValues {
   const values: EnvValues = {};
-  const lines = content.split("\n");
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-
-    const match = trimmed.match(/^([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/i);
-    if (!match) continue;
-
-    const name = match[1];
-    let value = match[2];
-    const commentIdx = findInlineCommentIndex(value);
-    if (commentIdx !== -1) {
-      value = value.slice(0, commentIdx);
-    }
-    value = value.trim();
-
-    if (
-      isWrappedInQuotes(value, "'") ||
-      isWrappedInQuotes(value, '"')
-    ) {
-      const quote = value[0] as "'" | '"';
-      value = unescapeQuotedValue(value.slice(1, -1), quote);
-    }
-
-    values[name] = value;
+  for (const line of content.split("\n")) {
+    const entry = parseEnvLine(line.trim());
+    if (entry) values[entry.name] = entry.value ?? "";
   }
-
   return values;
 }
 
@@ -363,35 +327,16 @@ export function generateLocalEnvContent(
   header?: EnvFileHeader
 ): string {
   const lines: string[] = header ? [formatHeaderLine(header), ""] : [];
-  const schemaByName = new Map(schema.map((entry) => [entry.name, entry]));
-  const emitted = new Set<string>();
-
+  const schemaNames = new Set(schema.map((entry) => entry.name));
   for (const entry of schema) {
-    if (!Object.prototype.hasOwnProperty.call(values, entry.name)) {
-      continue;
+    if (Object.hasOwn(values, entry.name)) {
+      lines.push(`${entry.name}=${formatLocalValue(values[entry.name])} ${formatSchemaComment(entry)}`);
     }
-    const value = values[entry.name];
-    lines.push(
-      `${entry.name}=${formatLocalValue(value)} ${formatSchemaComment(entry)}`
-    );
-    emitted.add(entry.name);
   }
-
   for (const [name, value] of Object.entries(values)) {
-    if (emitted.has(name)) {
-      continue;
-    }
-    if (schemaByName.has(name)) {
-      continue;
-    }
-    lines.push(`${name}=${formatLocalValue(value)}`);
+    if (!schemaNames.has(name)) lines.push(`${name}=${formatLocalValue(value)}`);
   }
-
-  if (lines.length === 0) {
-    return "";
-  }
-
-  return lines.join("\n") + "\n";
+  return lines.length === 0 ? "" : lines.join("\n") + "\n";
 }
 
 export function formatSchemaComment(s: EnvVarSchema): string {
@@ -448,16 +393,9 @@ export function upsertHeaderVersion(
   return `${header}\n\n${content}`;
 }
 
-export function envContentEqualIgnoringVersion(
-  left: string,
-  right: string
-): boolean {
-  return setHeaderVersion(left, null) === setHeaderVersion(right, null);
-}
-
 export function serializeEnvValues(values: EnvValues): string {
   return Object.entries(values)
-    .map(([key, value]) => `${key}=${value}`)
+    .map(([key, value]) => `${key}=${formatLocalValue(value)}`)
     .join("\n");
 }
 
@@ -482,24 +420,4 @@ export function appendSchemaEntry(
   type: string
 ): string {
   return content.trimEnd() + `\n${name}= # {${type}}\n`;
-}
-
-export function setEnvValue(
-  content: string,
-  name: string,
-  value: string
-): string {
-  const lines = content.split("\n");
-  const idx = lines.findIndex((l) => l.startsWith(`${name}=`));
-  if (idx >= 0) {
-    lines[idx] = `${name}=${value}`;
-  } else {
-    if (lines.length > 0 && lines[lines.length - 1] === "") {
-      lines[lines.length - 1] = `${name}=${value}`;
-      lines.push("");
-    } else {
-      lines.push(`${name}=${value}`);
-    }
-  }
-  return lines.join("\n");
 }

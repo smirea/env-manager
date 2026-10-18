@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createProjectSecretPayload,
-  getProjectEnvironment,
   listProjectEnvironments,
   normalizeProjectSecret,
 } from './project-secret';
@@ -42,18 +40,5 @@ describe('project secret payloads', () => {
         },
       })
     ).toEqual(['local', 'prod']);
-  });
-
-  test('returns a selected environment or fails clearly', () => {
-    const payload = createProjectSecretPayload(LEGACY_PAYLOAD.schema, {
-      prod: { values: 'API_KEY=prod', syncDate: '2026-01-03T00:00:00Z' },
-    });
-
-    expect(getProjectEnvironment('demo', payload, 'prod').values).toBe(
-      'API_KEY=prod'
-    );
-    expect(() => getProjectEnvironment('demo', payload, 'local')).toThrow(
-      'Environment "local" not found for project "demo"'
-    );
   });
 });

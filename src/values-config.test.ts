@@ -6,9 +6,7 @@ import type { CommandContext, EnvVarSchema } from './types';
 import {
   generateSwiftValuesContent,
   parseSwiftValues,
-  parseValuesConfig,
   resolveValuesConfig,
-  upsertValuesConfigField,
   writeValuesForConfig,
 } from './values-config';
 
@@ -41,18 +39,6 @@ const schema: EnvVarSchema[] = [
 ];
 
 describe('values config', () => {
-  test('parses explicit values format and path metadata', () => {
-    const config = parseValuesConfig(`# env-manager: demo | 2026-01-01T00:00:00Z
-# env-manager values.format: swift
-# env-manager values.path: Config/LocalSecrets.xcconfig
-`);
-
-    expect(config).toEqual({
-      format: 'swift',
-      path: 'Config/LocalSecrets.xcconfig',
-    });
-  });
-
   test('falls back to ts values when package.json exists', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, 'package.json'), '{}\n');
@@ -90,20 +76,6 @@ describe('values config', () => {
         warn.mockRestore();
       }
     });
-  });
-
-  test('upserts values metadata after the env-manager header', () => {
-    const content = upsertValuesConfigField(
-      '# env-manager: demo | 2026-01-01T00:00:00Z\n\nFOO= # {string}\n',
-      'values.format',
-      'swift'
-    );
-
-    expect(content.split('\n').slice(0, 3)).toEqual([
-      '# env-manager: demo | 2026-01-01T00:00:00Z',
-      '# env-manager values.format: swift',
-      '',
-    ]);
   });
 
   test('renders and parses swift xcconfig values', () => {

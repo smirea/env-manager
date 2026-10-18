@@ -29,25 +29,16 @@ import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
 import { generateCommand, planGeneration } from './commands/generate';
 import { upCommand } from './commands/up';
-import { loadOwnEnvFromPaths, resolveOwnEnvPaths } from './env-loader';
+import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
 import { resolveProjectName } from './project-name';
 import type { CommandContext } from './types';
-import { EnvManagerError } from './types';
+import { EnvManagerError, SCHEMA_TYPES } from './types';
 
 const RESERVED_PROJECT_NAMES = ['default', 'global'];
 const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
-const SUPPORTED_SCHEMA_TYPES = [
-  'string',
-  'int',
-  'float',
-  'bool',
-  'url',
-  'email',
-  'file',
-];
 const SUPPORTED_SCHEMA_VALIDATORS = ['min(n)', 'max(n)', 'format(/regex/)'];
 const HELP_FOOTER = `Supported schema formats:
-  Types: ${SUPPORTED_SCHEMA_TYPES.join(", ")}
+  Types: ${SCHEMA_TYPES.join(", ")}
   Validators: ${SUPPORTED_SCHEMA_VALIDATORS.join(", ")}
   Optional: prefix any type with "optional"
   Example: # {optional string:format(/^sk-/)}`;
@@ -568,7 +559,7 @@ const globalSetCmd: CommandModule<any, any> = withCommandContext({
   handler: async (argv) => {
     await checkAwsCredentials();
     const input = parseGlobalSetInput(argv as GlobalSetArgs);
-    await globalSetCommand(createContext('default'), input);
+    await globalSetCommand(input);
   },
 });
 
@@ -582,7 +573,7 @@ const globalGetCmd: CommandModule<any, any> = withCommandContext({
     }) as Argv<GlobalGetArgs>,
   handler: async (argv) => {
     await checkAwsCredentials();
-    await globalGetCommand(createContext('default'), argv.name);
+    await globalGetCommand(argv.name);
   },
 });
 
@@ -593,7 +584,7 @@ const globalListCmd: CommandModule<any, any> =
     describe: "List global default env vars",
     handler: async () => {
       await checkAwsCredentials();
-      await globalListCommand(createContext('default'));
+      await globalListCommand();
     },
   });
 
@@ -621,7 +612,7 @@ const globalRmCmd: CommandModule<any, any> = withCommandContext({
       throw new EnvManagerError('Usage: env-manager global rm <name>');
     }
     await checkAwsCredentials();
-    await globalRmCommand(createContext("default"), argv.name);
+    await globalRmCommand(argv.name);
   },
 });
 
@@ -748,7 +739,7 @@ const formatCmd: CommandModule<any, any> = {
 
 async function run() {
   process.chdir(resolveProjectRoot(process.cwd()));
-  loadOwnEnvFromPaths(resolveOwnEnvPaths(import.meta.url));
+  loadOwnEnv(resolveOwnPackageRoot(import.meta.url));
   const rootCommands: Array<CommandModule<any, any>> = [
     checkCmd,
     formatCmd,
@@ -773,6 +764,12 @@ async function run() {
     .command(rootCommands.map(withCommandContext) as Array<CommandModule<{}, any>>)
     .demandCommand(1, 'Please specify a command')
     .strict()
+    .fail((message, error, cli) => {
+      if (error) throw error;
+      cli.showHelp();
+      console.error(`\n${message}`);
+      process.exit(1);
+    })
     .version(false)
     .epilog(HELP_FOOTER)
     .help()

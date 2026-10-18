@@ -1,11 +1,6 @@
 import { setHeaderVersion } from './parser';
-import {
-  DEFAULT_ENVIRONMENT,
-  removeEnvironmentFromContent,
-  validateEnvironmentName,
-} from './environment';
+import { DEFAULT_ENVIRONMENT, removeEnvironmentFromContent } from './environment';
 import type { EnvironmentPayload, SecretPayload } from './types';
-import { EnvManagerError } from './types';
 
 export interface ProjectSecretPayload {
   schema: string;
@@ -15,16 +10,9 @@ export interface ProjectSecretPayload {
 export function normalizeProjectSecret(
   payload: SecretPayload
 ): ProjectSecretPayload {
-  if (payload.environments) {
-    return {
-      schema: setHeaderVersion(removeEnvironmentFromContent(payload.schema), null),
-      environments: payload.environments,
-    };
-  }
-
   return {
     schema: setHeaderVersion(removeEnvironmentFromContent(payload.schema), null),
-    environments: {
+    environments: payload.environments ?? {
       [DEFAULT_ENVIRONMENT]: {
         values: payload.values ?? '',
         syncDate: payload.syncDate ?? new Date().toISOString(),
@@ -42,22 +30,6 @@ export function createProjectSecretPayload(
     schema: setHeaderVersion(removeEnvironmentFromContent(schema), null),
     environments,
   };
-}
-
-export function getProjectEnvironment(
-  project: string,
-  payload: SecretPayload,
-  environment: string
-): EnvironmentPayload {
-  validateEnvironmentName(environment);
-  const normalized = normalizeProjectSecret(payload);
-  const envPayload = normalized.environments[environment];
-  if (!envPayload) {
-    throw new EnvManagerError(
-      `Environment "${environment}" not found for project "${project}"`
-    );
-  }
-  return envPayload;
 }
 
 export function listProjectEnvironments(payload: SecretPayload): string[] {
