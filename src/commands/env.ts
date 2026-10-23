@@ -1,10 +1,14 @@
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from '../aws';
 import {
+  DEFAULT_ENVIRONMENT,
+  findEnvironmentInContent,
+  findValuesEnvironmentInContent,
   resolveEnvironment,
-  upsertEnvironmentInContent,
+  upsertSelectionInContent,
   validateEnvironmentName,
 } from '../environment';
+import { pullEnvironment } from './down';
 import { parseEnvFile } from '../parser';
 import {
   createProjectSecretPayload,
@@ -41,22 +45,44 @@ async function resolveEnvironmentValuesPath(
     : undefined;
 }
 
+// Outside local mode the switch pulls the environment like `down`, so the values file
+// never holds one environment's values under another's label. A missing environment is
+// seeded from the current values on the next `up`; the marker records that choice.
 export async function envSetCommand(
   ctx: CommandContext,
-  environment: string
+  environment: string,
+  options: { local?: boolean } = {}
 ): Promise<void> {
   validateEnvironmentName(environment);
 
   const environmentPath =
     (await resolveEnvironmentValuesPath(ctx)) ?? `${ctx.cwd}/.env.local`;
-
   const localFile = Bun.file(environmentPath);
   const localContent = (await localFile.exists()) ? await localFile.text() : '';
-  await writeManagedFile(
-    environmentPath,
-    upsertEnvironmentInContent(localContent, environment)
-  );
+  const previous = findEnvironmentInContent(localContent) ?? DEFAULT_ENVIRONMENT;
+  const loadedFrom = findValuesEnvironmentInContent(localContent) ?? previous;
+
+  if (options.local) {
+    await writeManagedFile(environmentPath, upsertSelectionInContent(localContent, environment, loadedFrom));
+    console.log(`Set default environment to ${environment}`);
+    if (loadedFrom !== environment) {
+      console.warn(`Warning: local mode cannot load "${environment}"; the values file still holds "${loadedFrom}" values. Run "env-manager down --no-local" to load them.`);
+    }
+    return;
+  }
+
+  const secret = await createAwsAdapter().getSecret(secretName(ctx.project));
+  const projectSecret = secret ? normalizeProjectSecret(secret) : null;
+  const payload = projectSecret?.environments[environment];
+  if (projectSecret && payload) {
+    await pullEnvironment(ctx, projectSecret.schema, environment, payload);
+    console.log(`Set default environment to ${environment} and downloaded ${ctx.project}/${environment}`);
+    return;
+  }
+
+  await writeManagedFile(environmentPath, upsertSelectionInContent(localContent, environment, environment));
   console.log(`Set default environment to ${environment}`);
+  console.warn(`Environment "${environment}" does not exist in AWS yet. The current values (from "${loadedFrom}") will seed it on the next "env-manager up".`);
 }
 
 export async function envListCommand(ctx: CommandContext): Promise<void> {

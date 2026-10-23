@@ -1,7 +1,7 @@
 import { planGeneration, syncOutputs } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
-import { findEnvironment, upsertEnvironmentInContent, validateEnvironmentName } from "../environment";
+import { findEnvironment, upsertSelectionInContent, validateEnvironmentName } from "../environment";
 import { writeFilesFromPayload } from "../file-sync";
 import { envValuesEqual, parseEnvFile, parseEnvValues } from "../parser";
 import { normalizeProjectSecret } from "../project-secret";
@@ -48,11 +48,9 @@ export async function pullEnvironment(
       version: null,
     });
   }
-  if (valuesConfig.format === 'swift' && recorded !== environment) {
-    const selectorPath = join(ctx.cwd, '.env.local');
-    const selector = Bun.file(selectorPath);
-    await writeManagedFile(selectorPath, upsertEnvironmentInContent(await selector.exists() ? await selector.text() : '', environment));
-  }
+  const selectorPath = valuesConfig.format === 'ts' ? valuesPath : join(ctx.cwd, '.env.local');
+  const selector = Bun.file(selectorPath);
+  await writeManagedFile(selectorPath, upsertSelectionInContent(await selector.exists() ? await selector.text() : '', environment, environment));
   await syncOutputs(ctx, schema, envPayload.outputs);
 }
 

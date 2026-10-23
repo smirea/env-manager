@@ -3,7 +3,7 @@ import { dirname, join, relative } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { configError, parseRootConfig, relativeOutput, schemaForTarget, upsertSetting, type RootConfig } from '../config';
 import { preflightPaths, type OutputPath } from '../output-paths';
-import { resolveEnvironment, upsertEnvironmentInContent } from '../environment';
+import { findValuesEnvironment, resolveEnvironment, upsertEnvironmentInContent } from '../environment';
 import { envValuesEqual, generateLocalEnvContent, parseEnvValues } from '../parser';
 import type { CommandContext, EnvValues, EnvVarSchema, OutputVersions } from '../types';
 import { formatPrefixedHeader, hashContent, parseVersionRecord, readFileVersion, resolveVersion, upsertSourceMetadata, type CommentPrefix } from '../versions';
@@ -259,6 +259,12 @@ export async function generateCommand(
     content = lines.join('\n');
   }
   const plan = await planGeneration(ctx, content);
+  const selector = { valuesPath: plan.valuesConfig.format === 'ts' ? plan.valuesConfig.path : undefined };
+  const loadedFrom = await findValuesEnvironment(ctx.cwd, selector);
+  const environment = await resolveEnvironment(ctx.cwd, selector);
+  if (loadedFrom && loadedFrom !== environment) {
+    console.warn(`Warning: generating "${environment}" outputs from values loaded for "${loadedFrom}". Run "env-manager down" to load ${environment}.`);
+  }
   await materializePlan(ctx, plan, { target: options.target, createSource: true });
   if (content !== original) await writeManagedFile(envPath, content);
 }

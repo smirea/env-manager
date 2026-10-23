@@ -361,7 +361,7 @@ interface EnvNameArgs extends ProjectArgs {
 
 const envSetCmd: CommandModule<any, any> = withCommandContext({
   command: 'set <environment>',
-  describe: 'Set the default environment stored in .env.local',
+  describe: 'Select an environment and download it (local mode only switches the selector)',
   builder: (yargs: Argv<Record<string, never>>) =>
     yargs.positional('environment', {
       type: 'string',
@@ -374,7 +374,8 @@ const envSetCmd: CommandModule<any, any> = withCommandContext({
     }
     const project = resolveProject(args.project);
     validateProjectName(project, 'env');
-    await envSetCommand(createContext(project), args.environment);
+    if (!args.local) await checkAwsCredentials();
+    await envSetCommand(createContext(project), args.environment, { local: args.local });
   },
 });
 

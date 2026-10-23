@@ -77,7 +77,7 @@ env-manager generate
 | `set <field> <value>` | Set `.env` config: `local`, `format`, `path`, or `generate` |
 | `check [--strict]` | Validate root config and output paths without changing files |
 | `format` | Normalize spacing while preserving comments, values, variable order, and target scopes |
-| `env set <env>` | Set the default environment marker |
+| `env set <env>` | Select an environment and download it, or seed a new one |
 | `env list` (`env ls`) | List environments for a project |
 | `env rm <env>` | Remove an environment from AWS |
 | `global set` | Set a global default env var |
@@ -199,7 +199,7 @@ it. The root schema and one root values/files payload per environment are what
 ```bash
 env-manager gen                 # materialize all targets
 env-manager gen --target client # only this target; still validate the whole plan
-env-manager env set staging     # selects the root environment
+env-manager env set staging     # selects and downloads the root environment
 env-manager down --no-local     # fetch root values, regenerate child outputs
 ```
 
@@ -349,13 +349,27 @@ env-manager env ls
 env-manager env rm staging
 ```
 
-`env set` only updates the environment comment:
+`env set` selects the environment and records which environment the values
+came from:
 
 ```bash
 # env-manager env: staging
+# env-manager values env: staging
 ```
 
-The next `env-manager up` creates or updates that environment in AWS.
+If the environment exists in AWS, `env set` downloads it exactly like `down`
+and regenerates target children. If it does not exist yet, `env set` keeps the
+current values, warns that they will seed the new environment, and the next
+`env-manager up` creates it from them. In local mode `env set` only moves the
+selector and warns, since it cannot download; `generate` then warns that it is
+labelling outputs with an environment whose values were not loaded.
+
+`up` refuses to upload when the `values env` marker names a different
+environment than the selected one, so a local-mode switch never pushes one
+environment's values into another. Run `env-manager down` to load the selected
+environment, or `env-manager env set <env> --no-local` to confirm seeding a new
+one. Values files without a marker, such as ones written before this check
+existed, are not blocked; the next `down` or `env set` adds it.
 `env-manager down` downloads the current environment and fails if that
 environment has been removed remotely. `env-manager down --env prod` picks the
 environment explicitly and records it as the current one. With no recorded

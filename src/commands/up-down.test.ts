@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -119,7 +119,7 @@ describe('output versions', () => {
       const xcconfig = path.join(dir, 'Config/LocalSecrets.xcconfig');
 
       await downCommand(ctx, { environment: 'prod' });
-      expect(await readFile(path.join(dir, '.env.local'), 'utf8')).toBe('# env-manager env: prod\n');
+      expect(await readFile(path.join(dir, '.env.local'), 'utf8')).toBe('# env-manager env: prod\n# env-manager values env: prod\n');
       expect(await readFile(xcconfig, 'utf8')).toContain('FOO = prod');
 
       await downCommand(ctx);
@@ -155,6 +155,77 @@ describe('output versions', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  describe('env set', () => {
+    const SCHEMA = '# env-manager: envs\n# env-manager target: server format=ts path=.env.local\n# env-manager targets: server\nAPP_ENV=development # {string}\n';
+
+    async function withProject(fn: (ctx: { project: string; cwd: string }, read: (name: string) => Promise<string>) => Promise<void>) {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-env-set-'));
+      try {
+        secrets.delete('env-manager/envs');
+        await writeFile(path.join(dir, 'package.json'), '{}\n');
+        await writeFile(path.join(dir, '.env'), SCHEMA);
+        await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\n');
+        await fn({ project: 'envs', cwd: dir }, name => readFile(path.join(dir, name), 'utf8'));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+
+    test('switching to an existing environment downloads it and regenerates children', async () => {
+      await withProject(async (ctx, read) => {
+        await upCommand(ctx);
+        secrets.get('env-manager/envs')!.environments!.prod = { values: 'APP_ENV=production\n', syncDate: '2026-01-01T00:00:00Z' };
+
+        await envSetCommand(ctx, 'prod');
+        expect(await read('.env.local')).toContain("# env-manager env: prod\n# env-manager values env: prod\n");
+        expect(await read('.env.local')).toContain("APP_ENV='production'");
+        expect(await read('server/.env.local')).toContain("# env-manager env: prod\nAPP_ENV='production' # {string}\n");
+      });
+    });
+
+    test('switching to a new environment warns and seeds it from the current values on up', async () => {
+      await withProject(async (ctx, read) => {
+        await writeFile(path.join(ctx.cwd, '.env.local'), '# env-manager env: dev\nAPP_ENV=production\n');
+        await upCommand(ctx);
+        const warn = spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          await envSetCommand(ctx, 'prod');
+          expect(warn.mock.calls.map(call => call.join(' '))).toEqual(['Environment "prod" does not exist in AWS yet. The current values (from "dev") will seed it on the next "env-manager up".']);
+        } finally {
+          warn.mockRestore();
+        }
+        await upCommand(ctx);
+        expect(secrets.get('env-manager/envs')?.environments?.prod?.values).toBe("APP_ENV='production'");
+        expect(await read('server/.env.local')).toContain("# env-manager env: prod\nAPP_ENV='production'");
+      });
+    });
+
+    test('up refuses values left over from a local-mode switch', async () => {
+      await withProject(async (ctx, read) => {
+        await upCommand(ctx);
+        secrets.get('env-manager/envs')!.environments!.prod = { values: 'APP_ENV=production\n', syncDate: '2026-01-01T00:00:00Z' };
+        await downCommand(ctx);
+        const warn = spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          await envSetCommand(ctx, 'prod', { local: true });
+          await generateCommand(ctx);
+          expect(warn.mock.calls.map(call => call.join(' '))).toEqual([
+            'Warning: local mode cannot load "prod"; the values file still holds "dev" values. Run "env-manager down --no-local" to load them.',
+            'Warning: generating "prod" outputs from values loaded for "dev". Run "env-manager down" to load prod.',
+          ]);
+        } finally {
+          warn.mockRestore();
+        }
+        await expect(upCommand(ctx)).rejects.toThrow('Refusing to upload: the values file holds "dev" values but environment "prod" is selected. Run "env-manager down" to load prod.');
+        expect(secrets.get('env-manager/envs')?.environments?.prod?.values).toBe('APP_ENV=production\n');
+
+        await downCommand(ctx);
+        expect(await read('server/.env.local')).toContain("APP_ENV='production'");
+        await upCommand(ctx);
+      });
+    });
   });
 
   test('overrides survive down and never reach AWS', async () => {

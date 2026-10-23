@@ -41,7 +41,7 @@ utility to manage my own environment variables for all my personal projects
 
     3.7. `env-manager set <field> <value>` - sets `.env` config fields like `values.format` and `values.path`
 
-    `# env-manager local:true` persists local mode. Explicit `--local`/`--no-local` overrides it for one invocation; `init --local` persists it. Local mode skips all AWS and Git updates. Storage commands fail before credentials; `--no-local` permits them. `set local true|false`, `check`, `format`, and `env set` work locally. The stored `# env-manager ts: <path>` remains compatible.
+    `# env-manager local:true` persists local mode. Explicit `--local`/`--no-local` overrides it for one invocation; `init --local` persists it. Local mode skips all AWS and Git updates. Storage commands fail before credentials; `--no-local` permits them. `set local true|false`, `check`, `format`, and `env set` work locally. Outside local mode `env set <env>` downloads an existing environment like `down`, or keeps the current values to seed a new one on `up`; locally it only moves the selector and warns. The values file records `# env-manager values env: <env>` (where its values were loaded from or seeded for), and `up` refuses to upload when it differs from the selected env. The stored `# env-manager ts: <path>` remains compatible.
 
     flags:
     - `-p, --project <name>`: project name (defaults to `.env` header, then cwd basename)

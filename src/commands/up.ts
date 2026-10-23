@@ -1,9 +1,7 @@
 import { planGeneration, syncOutputs } from './generate';
 import { writeManagedFile } from '../git-updates';
 import { createAwsAdapter, secretName } from "../aws";
-import {
-  resolveEnvironment,
-} from "../environment";
+import { findValuesEnvironment, resolveEnvironment } from "../environment";
 import { collectFilePayload } from "../file-sync";
 import {
   envValuesEqual,
@@ -46,6 +44,15 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
     ? normalizeProjectSecret(existingSecret)
     : null;
   const existingEnvironment = existingProject?.environments[environment];
+  const loadedFrom = await findValuesEnvironment(ctx.cwd, {
+    valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
+  });
+  if (loadedFrom && loadedFrom !== environment) {
+    const fix = existingEnvironment
+      ? `Run "env-manager down" to load ${environment}`
+      : `Run "env-manager env set ${environment} --no-local" to confirm seeding it from the current values, or "env-manager env set ${loadedFrom}" to switch back`;
+    throw new EnvManagerError(`Refusing to upload: the values file holds "${loadedFrom}" values but environment "${environment}" is selected. ${fix}.`);
+  }
 
   if (!parsed.header) {
     if (existingSecret) {
