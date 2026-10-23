@@ -290,6 +290,27 @@ describe('generate command', () => {
     });
   });
 
+  test('regenerates a child from another environment even when its version is ahead of the record', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager target: server format=ts path=.env.local\n# env-manager targets: server\nAPP_ENV=development # {string}\n');
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\n');
+      await generateCommand(ctx);
+      const devRoot = await read('.env.local');
+      const devChild = await read('server/.env.local');
+
+      await writeFile(path.join(dir, '.env.local'), devRoot.replace('env: dev', 'env: prod') + 'APP_ENV=production\n');
+      await generateCommand(ctx);
+      expect(await read('server/.env.local')).toContain("# env-manager: test-project | v2\n# env-manager target: server\n# env-manager root: ..\n# env-manager env: prod\nAPP_ENV='production'");
+
+      await writeFile(path.join(dir, '.env.local'), devRoot);
+      await generateCommand(ctx);
+      expect(await read('server/.env.local')).toBe(devChild);
+      expect(await read('.env.local')).toBe(devRoot);
+    });
+  });
+
   describe('.env.override', () => {
     const MONOREPO = [
       '# env-manager: test-project',

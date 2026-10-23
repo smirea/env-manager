@@ -19,6 +19,8 @@ mock.module('../aws', () => ({
 
 const { upCommand } = await import('./up');
 const { downCommand } = await import('./down');
+const { envSetCommand } = await import('./env');
+const { generateCommand } = await import('./generate');
 
 describe('output versions', () => {
   test('bump only on mutation and stay out of .env', async () => {
@@ -122,6 +124,34 @@ describe('output versions', () => {
 
       await downCommand(ctx);
       expect(await readFile(xcconfig, 'utf8')).toContain('FOO = prod');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('switching environments regenerates target children even when their version is ahead', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-switch-'));
+    try {
+      const ctx = { project: 'switch', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, 'package.json'), '{}\n');
+      await writeFile(path.join(dir, '.env'), '# env-manager: switch\n# env-manager target: server format=ts path=.env.local\n# env-manager targets: server\nAPP_ENV=development # {string}\n');
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\n');
+      await upCommand(ctx);
+      const dev = await read('server/.env.local');
+      expect(dev).toBe("# env-manager: switch | v1\n# env-manager target: server\n# env-manager root: ..\n# env-manager env: dev\nAPP_ENV='development' # {string}\n");
+
+      await envSetCommand(ctx, 'prod');
+      await writeFile(path.join(dir, '.env.local'), (await read('.env.local')) + 'APP_ENV=production\n');
+      await upCommand(ctx);
+      expect(await read('server/.env.local')).toBe("# env-manager: switch | v2\n# env-manager target: server\n# env-manager root: ..\n# env-manager env: prod\nAPP_ENV='production' # {string}\n");
+
+      await envSetCommand(ctx, 'dev');
+      await downCommand(ctx);
+      expect(await read('server/.env.local')).toBe(dev);
+
+      await generateCommand(ctx);
+      expect(await read('server/.env.local')).toBe(dev);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
