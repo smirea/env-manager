@@ -4,11 +4,11 @@ import { mkdir } from 'node:fs/promises';
 import { configError, parseRootConfig, relativeOutput, schemaForTarget, upsertSetting, type RootConfig } from '../config';
 import { preflightPaths, type OutputPath } from '../output-paths';
 import { resolveEnvironment, upsertEnvironmentInContent } from '../environment';
-import { generateLocalEnvContent, parseEnvValues } from '../parser';
+import { envValuesEqual, generateLocalEnvContent, parseEnvValues } from '../parser';
 import type { CommandContext, EnvValues, EnvVarSchema, OutputVersions } from '../types';
 import { formatPrefixedHeader, hashContent, parseVersionRecord, readFileVersion, resolveVersion, upsertSourceMetadata, type CommentPrefix } from '../versions';
 import { EnvManagerError } from '../types';
-import { generateSwiftValuesContent, readValuesForConfig, resolveValuesConfig, type ValuesConfig } from '../values-config';
+import { generateSwiftValuesContent, parseSwiftValues, readValuesForConfig, resolveValuesConfig, type ValuesConfig } from '../values-config';
 import { validateEnv } from '../validator';
 
 const DEFAULT_OUTPUT_PATH = 'src/env.ts';
@@ -147,18 +147,29 @@ async function readOverrides(ctx: CommandContext, plan: GenerationPlan): Promise
   return overrides;
 }
 
-// Formatters only touch whitespace, quotes, semicolons, commas and parens, so a file
-// that still differs after dropping those holds other content and must be rewritten.
-// Versions alone cannot decide this: they are numbered per environment, so a child
-// generated for prod can carry a higher version than the dev render replacing it.
+// Formatters only touch whitespace, quotes, semicolons, commas and parens in readers, so a
+// reader that still differs after dropping those was edited by hand. Values files are not
+// formatted, so they compare by parsed values and metadata lines, where whitespace or a
+// comma inside a value is a real change. Versions alone cannot decide either case: they are
+// numbered per environment, so a prod child can carry a higher version than the dev render.
 function fingerprint(content: string): string {
   return content.replace(/[\s'"`;,()]/g, '');
+}
+
+function metadata(content: string): string[] {
+  return content.split('\n').filter(line => /^(?:#|\/\/)\s*env-manager[\s:]/.test(line));
+}
+
+function matchesRender(output: PlannedOutput, existing: string, rendered: string): boolean {
+  if (output.kind === 'reader') return fingerprint(existing) === fingerprint(rendered);
+  const parse = output.format === 'swift' ? parseSwiftValues : parseEnvValues;
+  return metadata(existing).join('\n') === metadata(rendered).join('\n') && envValuesEqual(parse(existing), parse(rendered));
 }
 
 type MaterializeOptions = { target?: string; remote?: OutputVersions; readers?: boolean; createSource?: boolean };
 
 // Each output's version only moves when its rendered content changes. A file is rewritten
-// when its version is lower or its content drifted from the render, so formatter-only
+// when its version is lower or its content no longer matches the render, so formatter-only
 // edits survive reruns but hand edits and other environments' outputs are replaced.
 export async function materializePlan(ctx: CommandContext, plan: GenerationPlan, options: MaterializeOptions = {}): Promise<OutputVersions> {
   if (options.target && !plan.config.targets.some(t => t.name === options.target)) configError(join(ctx.cwd, '.env'), 1, `Unknown target "${options.target}".`);
@@ -200,7 +211,7 @@ export async function materializePlan(ctx: CommandContext, plan: GenerationPlan,
     });
     record[key] = entry;
     if (output.source) continue;
-    if (existing !== null && fileVersion !== null && fileVersion >= entry.version && fingerprint(existing) === fingerprint(renderedAtFileVersion)) continue;
+    if (existing !== null && fileVersion !== null && fileVersion >= entry.version && matchesRender(output, existing, renderedAtFileVersion)) continue;
     await mkdir(dirname(output.path), { recursive: true });
     if (await writeManagedFile(output.path, renderOutput(ctx, output, selectedValues, environment, entry.version))) {
       console.log(`Generated ${key}`);

@@ -311,6 +311,39 @@ describe('generate command', () => {
     });
   });
 
+  test('regenerates values children whose values differ only by whitespace or commas', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), [
+        '# env-manager: test-project',
+        '# env-manager target: web format=ts path=.env.local',
+        '# env-manager target: ios format=swift path=Config/LocalSecrets.xcconfig',
+        '# env-manager targets: *',
+        'NAME= # {string}',
+        '',
+      ].join('\n'));
+      for (const [older, newer] of [['a b', 'ab'], ['x,y', 'xy']]) {
+        await writeFile(path.join(dir, '.env.local'), `NAME='${older}'\n`);
+        await generateCommand(ctx);
+        const olderRoot = await read('.env.local');
+        const olderWeb = await read('web/.env.local');
+        const olderIos = await read('ios/Config/LocalSecrets.xcconfig');
+        expect(olderWeb).toContain(`NAME='${older}' # {string}`);
+        expect(olderIos).toContain(`NAME = ${older}\n`);
+
+        await writeFile(path.join(dir, '.env.local'), olderRoot.replace(`NAME='${older}'`, `NAME='${newer}'`));
+        await generateCommand(ctx);
+        expect(await read('web/.env.local')).toContain(`NAME='${newer}' # {string}`);
+
+        await writeFile(path.join(dir, '.env.local'), olderRoot);
+        await generateCommand(ctx);
+        expect(await read('web/.env.local')).toBe(olderWeb);
+        expect(await read('ios/Config/LocalSecrets.xcconfig')).toBe(olderIos);
+      }
+    });
+  });
+
   describe('.env.override', () => {
     const MONOREPO = [
       '# env-manager: test-project',

@@ -484,10 +484,11 @@ target child, and each reader. The version sits at the end of the file's header
 
 An output's version increments only when the content env-manager would write for
 it changes. A file is rewritten when its version is lower than the known
-version, or when its content no longer matches what env-manager would write,
-ignoring whitespace, quotes, semicolons, commas, and parentheses. Formatter-only
-edits to generated files survive later runs, while hand edits and children left
-over from another environment are replaced. Versions are numbered per
+version, or when its content no longer matches what env-manager would write.
+Readers are compared ignoring whitespace, quotes, semicolons, commas, and
+parentheses; values files are compared by parsed values and `env-manager`
+metadata lines. Formatter-only edits survive later runs, while hand edits and
+children left over from another environment are replaced. Versions are numbered per
 environment, so a child from another environment can carry a higher version
 than the current render. AWS
 stores each environment's output versions with a content hash and date. The root
