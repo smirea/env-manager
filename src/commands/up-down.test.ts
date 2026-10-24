@@ -8,6 +8,7 @@ const secrets = new Map<string, SecretPayload>();
 const puts: SecretPayload[] = [];
 mock.module('../aws', () => ({
   secretName: (project: string) => `env-manager/${project}`,
+  checkAwsCredentials: async () => {},
   createAwsAdapter: () => ({
     getSecret: async (name: string) => structuredClone(secrets.get(name) ?? null),
     putSecret: async (name: string, payload: SecretPayload) => {
@@ -21,6 +22,7 @@ const { upCommand } = await import('./up');
 const { downCommand } = await import('./down');
 const { envSetCommand } = await import('./env');
 const { generateCommand, generateFromEnvironment } = await import('./generate');
+const { collectInfo } = await import('./info');
 
 describe('output versions', () => {
   test('bump only on mutation and stay out of .env', async () => {
@@ -287,6 +289,25 @@ describe('generate --env', () => {
       await generateCommand(ctx);
       expect(await read('ios/Config/LocalSecrets.xcconfig')).toBe(dev);
       await expect(generateFromEnvironment(ctx, 'staging')).rejects.toThrow('Available: dev, prod');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('info', () => {
+  test('reports whether down would replace .env with a different stored schema', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-info-'));
+    try {
+      const ctx = { project: 'drift', cwd: dir };
+      const schema = '# env-manager: drift | 2025-01-01T00:00:00Z\n# env-manager format: swift\n\nFOO= # {string}\n';
+      await writeFile(path.join(dir, '.env'), schema);
+      expect((await collectInfo(ctx, { local: false })).storedSchema).toBe('missing');
+      secrets.set('env-manager/drift', { schema: schema.replace(' | 2025-01-01T00:00:00Z', ''), environments: { prod: { values: 'FOO=a\n', syncDate: '2026-01-01T00:00:00Z' } } });
+      const info = await collectInfo(ctx, { local: false });
+      expect([info.storedSchema, info.environments]).toEqual(['in-sync', ['prod']]);
+      secrets.set('env-manager/drift', { schema: '# env-manager: drift\n# env-manager format: swift\n\nOLD= # {string}\n' });
+      expect((await collectInfo(ctx, { local: false })).storedSchema).toBe('differs');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

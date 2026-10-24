@@ -257,7 +257,8 @@ ownership fails rather than turning the child into a new project.
 
 `env-manager info` is read-only and prints JSON for other tools: project, root,
 local mode, the current environment (`current`, and `valuesLoadedFrom` from the
-values marker), stored `environments` from AWS, the values source, `.env.override`
+values marker), stored `environments` from AWS, `storedSchema` (`in-sync`,
+`differs`, or `missing`: whether `down` would rewrite `.env`), the values source, `.env.override`
 keys, every planned output with whether it exists, targets with their variable
 names, and each variable's type, optionality, default, and targets.
 

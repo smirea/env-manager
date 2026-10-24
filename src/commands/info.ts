@@ -3,7 +3,7 @@ import { schemaForTarget } from '../config';
 import { checkAwsCredentials, createAwsAdapter, secretName } from '../aws';
 import { findValuesEnvironment, resolveEnvironment } from '../environment';
 import { parseEnvValues } from '../parser';
-import { listProjectEnvironments } from '../project-secret';
+import { listProjectEnvironments, normalizeProjectSecret } from '../project-secret';
 import type { CommandContext } from '../types';
 import { NotInitializedError } from '../types';
 import { OVERRIDE_FILE, planGeneration } from './generate';
@@ -17,6 +17,7 @@ export interface ProjectInfo {
   environment: { current: string; valuesLoadedFrom: string | null };
   environments: string[] | null;
   environmentsError: string | null;
+  storedSchema: 'in-sync' | 'differs' | 'missing' | null;
   values: { path: string; format: 'ts' | 'swift'; exists: boolean };
   override: { path: string; variables: string[] } | null;
   outputs: { target: string | null; kind: 'values' | 'reader'; format: 'ts' | 'swift'; path: string; exists: boolean }[];
@@ -44,6 +45,7 @@ export async function collectInfo(ctx: CommandContext, options: { local: boolean
 
   let environments: string[] | null = null;
   let environmentsError: string | null = null;
+  let storedSchema: ProjectInfo['storedSchema'] = null;
   if (options.local) {
     environmentsError = 'Local mode: stored environments are not read. Pass --no-local to read them.';
   } else {
@@ -51,6 +53,9 @@ export async function collectInfo(ctx: CommandContext, options: { local: boolean
       await checkAwsCredentials();
       const secret = await createAwsAdapter().getSecret(secretName(ctx.project));
       environments = secret ? listProjectEnvironments(secret) : [];
+      // down replaces .env with the stored schema, so callers need to know when that would rewrite it.
+      storedSchema = !secret ? 'missing'
+        : normalizeProjectSecret(secret).schema === normalizeProjectSecret({ schema: content }).schema ? 'in-sync' : 'differs';
     } catch (error) {
       environmentsError = error instanceof Error ? error.message : String(error);
     }
@@ -68,6 +73,7 @@ export async function collectInfo(ctx: CommandContext, options: { local: boolean
     },
     environments,
     environmentsError,
+    storedSchema,
     values: {
       path: join(ctx.cwd, valuesConfig.path),
       format: valuesConfig.format,
