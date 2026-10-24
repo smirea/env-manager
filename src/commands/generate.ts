@@ -3,13 +3,15 @@ import { dirname, join, relative } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { configError, parseRootConfig, relativeOutput, schemaForTarget, upsertSetting, type RootConfig } from '../config';
 import { preflightPaths, type OutputPath } from '../output-paths';
-import { findValuesEnvironment, resolveEnvironment, upsertEnvironmentInContent } from '../environment';
+import { findValuesEnvironment, resolveEnvironment, upsertEnvironmentInContent, validateEnvironmentName } from '../environment';
+import { createAwsAdapter, secretName } from '../aws';
+import { normalizeProjectSecret } from '../project-secret';
 import { envValuesEqual, generateLocalEnvContent, parseEnvValues } from '../parser';
 import type { CommandContext, EnvValues, EnvVarSchema, OutputVersions } from '../types';
 import { formatPrefixedHeader, hashContent, parseVersionRecord, readFileVersion, resolveVersion, upsertSourceMetadata, type CommentPrefix } from '../versions';
 import { EnvManagerError } from '../types';
 import { generateSwiftValuesContent, parseSwiftValues, readValuesForConfig, resolveValuesConfig, type ValuesConfig } from '../values-config';
-import { validateEnv } from '../validator';
+import { assertValid, validateEnv } from '../validator';
 
 const DEFAULT_OUTPUT_PATH = 'src/env.ts';
 
@@ -267,6 +269,40 @@ export async function generateCommand(
   }
   await materializePlan(ctx, plan, { target: options.target, createSource: true });
   if (content !== original) await writeManagedFile(envPath, content);
+}
+
+// Renders a stored environment into target children without selecting it: .env, the root
+// values file, the selector, readers and version records stay as they are, and
+// .env.override is ignored, so children hold exactly what that environment deploys. The next
+// plain `generate` replaces them because their env metadata no longer matches its render.
+export async function generateFromEnvironment(ctx: CommandContext, environment: string, options: { target?: string } = {}): Promise<void> {
+  validateEnvironmentName(environment);
+  const envPath = join(ctx.cwd, '.env');
+  if (!(await Bun.file(envPath).exists())) throw new EnvManagerError(`.env not found at ${envPath}`);
+  const plan = await planGeneration(ctx, await Bun.file(envPath).text());
+  if (!plan.config.targets.length) configError(envPath, 1, '--env needs target declarations: in a single-project setup the values file is the source. Use env-manager env set <env>.');
+  if (options.target && !plan.config.targets.some(t => t.name === options.target)) configError(envPath, 1, `Unknown target "${options.target}".`);
+  const secret = await createAwsAdapter().getSecret(secretName(ctx.project));
+  if (!secret) throw new EnvManagerError(`Project "${ctx.project}" not found in AWS Secrets Manager`);
+  const environments = normalizeProjectSecret(secret).environments;
+  const payload = environments[environment];
+  if (!payload) throw new EnvManagerError(`Environment "${environment}" not found for project "${ctx.project}". Available: ${Object.keys(environments).sort().join(', ')}`);
+  const values = parseEnvValues(payload.values);
+  const outputs = plan.outputs.filter(o => !o.source && o.kind === 'values' && (!options.target || o.target === options.target));
+  const rendered = outputs.map(output => {
+    const selected: Record<string, string> = {};
+    for (const entry of output.schema) selected[entry.name] = values[entry.name] ?? entry.defaultValue ?? '';
+    assertValid(validateEnv(output.schema, selected));
+    return { output, selected };
+  });
+  for (const { output, selected } of rendered) {
+    const file = Bun.file(output.path);
+    const version = (await file.exists()) ? readFileVersion(await file.text()) : null;
+    await mkdir(dirname(output.path), { recursive: true });
+    if (await writeManagedFile(output.path, renderOutput(ctx, output, selected, environment, version))) {
+      console.log(`Generated ${relative(ctx.cwd, output.path)} from ${environment}`);
+    }
+  }
 }
 
 export async function syncOutputs(ctx: CommandContext, envContent: string, remote?: OutputVersions): Promise<OutputVersions> {

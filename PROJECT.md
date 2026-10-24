@@ -71,6 +71,8 @@ Preflight completes before generation writes any files.
 
 `info` is read-only JSON for scripts: environments (AWS, `null` in local mode),
 targets, outputs, overrides, and variable schema. It exits 3 without a setup.
+`generate --env <env>` renders children from a stored environment without selecting it
+or touching .env, root values, readers, version records, or overrides.
 
 ## Key Providers
 

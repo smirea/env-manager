@@ -108,6 +108,7 @@ The persistent `# env-manager local:true` setting also disables all Git updates.
 | `-p, --project <name>` | Project name (default: `.env` header, then current directory name) |
 | `--local` / `--no-local` | Override project local mode for this invocation |
 | `--target <name>` | Generate only one declared target (`generate` and aliases) |
+| `--env <name>` | Render target values from a stored environment without selecting it (`generate` only) |
 | `--strict` | Require type annotations in legacy files too (`check`) |
 | `-f, --force` | Replace the stored TypeScript output path (`generate` only, including aliases) |
 | `-y, --yes` | Accept defaults for prompts (non-interactive) |
@@ -207,6 +208,15 @@ env-manager down --no-local     # fetch root values, regenerate child outputs
 Git-ignore the root `.env.local` and generated target values files. Readers can
 be committed. Child values include only selected variables; readers include
 only their schema and never contain secret values.
+
+### Rendering another environment
+
+`env-manager gen --env prod` renders the target value files from the stored `prod`
+values with the local schema. It does not select `prod`. It leaves `.env`, the root
+values file, readers, and version records unchanged, and it ignores `.env.override`.
+Use it for builds that need another environment's values, such as a release build
+of an app. The next plain `env-manager gen` restores the children for the current
+environment. Single-project setups have no children, so use `env set` there.
 
 ### Local overrides
 

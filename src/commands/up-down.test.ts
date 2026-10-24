@@ -20,7 +20,7 @@ mock.module('../aws', () => ({
 const { upCommand } = await import('./up');
 const { downCommand } = await import('./down');
 const { envSetCommand } = await import('./env');
-const { generateCommand } = await import('./generate');
+const { generateCommand, generateFromEnvironment } = await import('./generate');
 
 describe('output versions', () => {
   test('bump only on mutation and stay out of .env', async () => {
@@ -243,6 +243,50 @@ describe('output versions', () => {
       await downCommand(ctx);
       expect(await readFile(path.join(dir, '.env.local'), 'utf8')).toContain('PORT=3000');
       expect(await readFile(path.join(dir, 'web/.env.local'), 'utf8')).toContain('PORT=4100 ');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('generate --env', () => {
+  test('renders a stored environment into children with the local schema and leaves the selection alone', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-gen-env-'));
+    try {
+      const ctx = { project: 'render', cwd: dir };
+      const schema = [
+        '# env-manager: render',
+        '# env-manager target: ios format=swift',
+        '# env-manager targets: ios',
+        'API_URL= # {url}',
+        'NEW_FLAG=on # {string}',
+        '',
+      ].join('\n');
+      await writeFile(path.join(dir, '.env'), schema);
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\nAPI_URL=http://127.0.0.1:1\n');
+      await writeFile(path.join(dir, '.env.override'), 'API_URL=http://127.0.0.1:2\n');
+      secrets.set('env-manager/render', {
+        schema: '# env-manager: render\n# env-manager target: ios format=swift\n# env-manager targets: ios\nAPI_URL= # {url}\n',
+        environments: {
+          dev: { values: 'API_URL=http://127.0.0.1:1\n', syncDate: '2026-01-01T00:00:00Z' },
+          prod: { values: 'API_URL=https://prod.example.com\n', syncDate: '2026-01-01T00:00:00Z' },
+        },
+      });
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await generateCommand(ctx);
+      const dev = await read('ios/Config/LocalSecrets.xcconfig');
+      const rootValues = await read('.env.local');
+
+      await generateFromEnvironment(ctx, 'prod');
+      const prod = await read('ios/Config/LocalSecrets.xcconfig');
+      expect(prod).toContain('// env-manager env: prod\n');
+      expect(prod).toContain('API_URL = https:/$()/prod.example.com\nNEW_FLAG = on\n');
+      expect(await read('.env')).toBe(schema);
+      expect(await read('.env.local')).toBe(rootValues);
+
+      await generateCommand(ctx);
+      expect(await read('ios/Config/LocalSecrets.xcconfig')).toBe(dev);
+      await expect(generateFromEnvironment(ctx, 'staging')).rejects.toThrow('Available: dev, prod');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

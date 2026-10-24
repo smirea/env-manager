@@ -27,7 +27,7 @@ import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
 import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
-import { generateCommand, planGeneration } from './commands/generate';
+import { generateCommand, generateFromEnvironment, planGeneration } from './commands/generate';
 import { upCommand } from './commands/up';
 import { infoCommand } from './commands/info';
 import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
@@ -194,6 +194,7 @@ interface GenerateArgs extends ProjectArgs {
   path?: string;
   force: boolean;
   target?: string;
+  env?: string;
 }
 
 const generateCmd: CommandModule<any, any> = {
@@ -218,9 +219,21 @@ const generateCmd: CommandModule<any, any> = {
           default: false,
           description: "Overwrite ts path stored in .env",
         })
-    ) as Argv<GenerateArgs>,
+        .option('env', {
+          type: 'string',
+          description: 'Render target values from this stored environment without selecting it or touching the root values',
+        })
+    ) as unknown as Argv<GenerateArgs>,
   handler: async (argv) => {
     const args = argv as unknown as GenerateArgs;
+    if (args.env) {
+      if (args.path) throw new EnvManagerError('--env cannot be combined with a reader path.');
+      if (args.local) throw new EnvManagerError('generate --env reads secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.');
+      const project = resolveProject(args.project);
+      await checkAwsCredentials();
+      await generateFromEnvironment(createContext(project), args.env, { target: args.target });
+      return;
+    }
     await generateCommand(createContext(resolveProject(args.project)), args.path, {
       force: args.force,
       target: args.target,
