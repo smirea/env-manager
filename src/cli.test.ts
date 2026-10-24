@@ -236,3 +236,43 @@ PORT=3000 # {int}
     });
   });
 });
+
+describe('info', () => {
+  test('exits 3 without a setup and describes targets read-only', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      const missing = run(cwd, cli, 'info');
+      expect(missing.code).toBe(3);
+      expect(missing.stderr).toContain('No env-manager setup');
+
+      await writeFile(join(cwd, '.env'), [
+        '# env-manager: demo',
+        '# env-manager target: ios format=swift',
+        '# env-manager target: web format=ts',
+        '# env-manager targets: ios,web',
+        'API_URL=https://example.com # {url}',
+        '# env-manager targets: web',
+        'PORT= # {optional int}',
+        '',
+      ].join('\n'));
+      await writeFile(join(cwd, '.env.local'), '# env-manager env: prod\n# env-manager values env: prod\nAPI_URL=https://prod.example.com\n');
+      await writeFile(join(cwd, '.env.override'), 'API_URL=http://127.0.0.1:1\n');
+      await initRepo(cwd);
+
+      const result = run(cwd, cli, 'info', '--local');
+      expect(result.code).toBe(0);
+      const info = JSON.parse(result.stdout);
+      expect(info.environment).toEqual({ current: 'prod', valuesLoadedFrom: 'prod' });
+      expect(info.environments).toBe(null);
+      expect(info.override.variables).toEqual(['API_URL']);
+      expect(info.targets.map((t: { name: string; format: string; variables: string[] }) => [t.name, t.format, t.variables])).toEqual([
+        ['ios', 'swift', ['API_URL']],
+        ['web', 'ts', ['API_URL', 'PORT']],
+      ]);
+      expect(info.variables).toEqual([
+        { name: 'API_URL', type: 'url', optional: false, default: 'https://example.com', targets: ['ios', 'web'] },
+        { name: 'PORT', type: 'int', optional: true, default: null, targets: ['web'] },
+      ]);
+      expect(git(cwd, 'status', '--porcelain')).toBe('');
+    });
+  });
+});

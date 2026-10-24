@@ -69,6 +69,9 @@ invalid defaults or validators, unused/unknown targets, output collisions,
 symlink escapes, and foreign ownership are errors with file and line diagnostics.
 Preflight completes before generation writes any files.
 
+`info` is read-only JSON for scripts: environments (AWS, `null` in local mode),
+targets, outputs, overrides, and variable schema. It exits 3 without a setup.
+
 ## Key Providers
 
 Providers automate API key creation via browser automation (`claude --chrome`).

@@ -76,6 +76,7 @@ env-manager generate
 | `print [project] -e <env>` | Print one stored environment for a project |
 | `set <field> <value>` | Set `.env` config: `local`, `format`, `path`, or `generate` |
 | `check [--strict]` | Validate root config and output paths without changing files |
+| `info` | Print the project setup as JSON for scripts; exits 3 when there is no setup |
 | `format` | Normalize spacing while preserving comments, values, variable order, and target scopes |
 | `env set <env>` | Select an environment and download it, or seed a new one |
 | `env list` (`env ls`) | List environments for a project |
@@ -241,6 +242,18 @@ The root pointer is relative to the output file's directory. These are ownership
 headers, not declarations. Commands from child directories find the owning root
 through that pointer or by walking to the root `.env`. Broken or mismatched
 ownership fails rather than turning the child into a new project.
+
+## Project info
+
+`env-manager info` is read-only and prints JSON for other tools: project, root,
+local mode, the current environment (`current`, and `valuesLoadedFrom` from the
+values marker), stored `environments` from AWS, the values source, `.env.override`
+keys, every planned output with whether it exists, targets with their variable
+names, and each variable's type, optionality, default, and targets.
+
+`environments` is `null` with `environmentsError` set when storage is unavailable,
+including local mode. Without a `.env` or project header, `info` exits with code 3,
+so callers can tell a missing setup from a broken one (exit 1).
 
 ## Validation and formatting
 

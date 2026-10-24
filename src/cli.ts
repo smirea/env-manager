@@ -29,10 +29,11 @@ import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
 import { generateCommand, planGeneration } from './commands/generate';
 import { upCommand } from './commands/up';
+import { infoCommand } from './commands/info';
 import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
 import { resolveProjectName } from './project-name';
 import type { CommandContext } from './types';
-import { EnvManagerError, SCHEMA_TYPES } from './types';
+import { EnvManagerError, NotInitializedError, SCHEMA_TYPES } from './types';
 
 const RESERVED_PROJECT_NAMES = ['default', 'global'];
 const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
@@ -65,12 +66,13 @@ function withCommandContext(command: CommandModule<any, any>): CommandModule<any
         throw error;
       });
       const commandName = argv._.map(String).join(' ');
-      const misplacedEnvironment = original !== undefined && commandName !== 'check' ? findEnvironmentInContent(original) : null;
+      const readOnly = commandName === 'check' || commandName === 'info';
+      const misplacedEnvironment = original !== undefined && !readOnly ? findEnvironmentInContent(original) : null;
       const content = misplacedEnvironment ? removeEnvironmentFromContent(original!) : original;
       const config = content !== undefined ? parseRootConfig(content, envPath, argv.strict === true) : undefined;
       const enablingLocal = commandName === 'set' && argv.field === 'local' && argv.value === 'true';
       const local = argv.local ?? (enablingLocal || config?.local === true);
-      const localCommands = ['init', 'generate', 'gen', 'ts', 'set', 'env set', 'check', 'format'];
+      const localCommands = ['init', 'generate', 'gen', 'ts', 'set', 'env set', 'check', 'format', 'info'];
       const catalog = commandName === 'new-key' && argv.list;
       if (local && !localCommands.includes(commandName) && !catalog && commandName !== 'env') {
         throw new EnvManagerError(`${commandName} requires secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.`);
@@ -87,7 +89,7 @@ function withCommandContext(command: CommandModule<any, any>): CommandModule<any
         }
         await command.handler({ ...argv, local });
       };
-      if (local || commandName === 'check' || catalog) await operation();
+      if (local || readOnly || catalog) await operation();
       else await withGitUpdates(process.cwd(), operation);
     },
   };
@@ -725,6 +727,15 @@ const checkCmd: CommandModule<any, any> = {
   },
 };
 
+const infoCmd: CommandModule<any, any> = {
+  command: 'info',
+  describe: `Print project setup as JSON: environments, targets, outputs, and variables (exit ${NotInitializedError.exitCode} without a setup)`,
+  builder: (yargs: Argv<Record<string, never>>) => withProjectOption(yargs),
+  handler: async (argv) => {
+    await infoCommand(createContext(resolveProject(argv.project)), { local: argv.local === true });
+  },
+};
+
 const formatCmd: CommandModule<any, any> = {
   command: 'format',
   describe: 'Normalize .env formatting while preserving comments, values, order, and scopes',
@@ -743,6 +754,7 @@ async function run() {
   loadOwnEnv(resolveOwnPackageRoot(import.meta.url));
   const rootCommands: Array<CommandModule<any, any>> = [
     checkCmd,
+    infoCmd,
     formatCmd,
     upCmd,
     downCmd,
@@ -784,5 +796,5 @@ run().catch((e) => {
   } else {
     console.error(e);
   }
-  process.exit(1);
+  process.exit(e instanceof NotInitializedError ? NotInitializedError.exitCode : 1);
 });
