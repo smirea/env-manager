@@ -37,7 +37,7 @@ type ProjectNeed = 'project' | 'named' | 'clone' | 'init' | 'none';
 
 interface Needs {
   project: ProjectNeed;
-  storage: 'required' | 'unless-local' | 'none';
+  storage: 'required' | 'inspect' | 'unless-local' | 'none';
   readOnly?: boolean;
   local?: boolean;
 }
@@ -132,12 +132,15 @@ function toModule(spec: Command, prefix: string): CommandModule<any, any> {
       const content = existing !== null && hasMetadata(existing) ? existing : null;
       const config = content === null ? null : parseRootConfig(removeSelection(content), envPath);
       const local: boolean = argv.local ?? needs.local ?? config?.local === true;
-      if (local && needs.storage === 'required') {
+      const usesStorage = needs.storage === 'required' || needs.storage === 'inspect' || (needs.storage === 'unless-local' && !local);
+      if (local && (needs.storage === 'required' || needs.storage === 'inspect')) {
         throw new EnvManagerError(`${name} requires secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.`);
       }
       const ctx: CommandContext = { project: resolveProjectName(process.cwd(), argv.project), cwd: process.cwd() };
-      if (needs.project !== 'none') validateProjectName(ctx.project, name);
-      if (needs.storage === 'required' || (needs.storage === 'unless-local' && !local)) await checkAwsCredentials();
+      if (needs.project !== 'none' && !needs.readOnly) {
+        validateProjectName(ctx.project, name, { reserved: needs.storage !== 'inspect' && needs.storage !== 'none' });
+      }
+      if (usesStorage) await checkAwsCredentials();
       const operation = async () => {
         if (content !== null && !needs.readOnly) await moveSelectionOutOfSchema(ctx, content);
         await spec.run({ ...argv, local }, ctx);
@@ -163,6 +166,7 @@ function toGroup(group: Group): CommandModule<any, any> {
 
 const project = { project: 'project', storage: 'none' } as const;
 const named = { project: 'named', storage: 'required' } as const;
+const inspect = { project: 'named', storage: 'inspect' } as const;
 const global = { project: 'none', storage: 'required' } as const;
 
 function requireArg(value: string | undefined, usage: string): string {
@@ -211,9 +215,8 @@ const commands: (Command | Group)[] = [
     describe: 'Normalize .env formatting while preserving comments, values, order, and scopes',
     needs: project,
     run: async (_argv, ctx) => {
-      const file = join(ctx.cwd, '.env');
-      const content = await Bun.file(file).text();
-      await writeManagedFile(file, formatRootConfig(content, file));
+      const project = await loadProject(ctx);
+      await writeManagedFile(project.envPath, formatRootConfig(project.content, project.envPath));
       console.log('Formatted .env');
     },
   },
@@ -276,7 +279,7 @@ const commands: (Command | Group)[] = [
     builder: y => y
       .positional('project', { type: 'string', description: 'Project name' })
       .option('env', { alias: 'e', type: 'string', description: 'Only print one environment' }),
-    needs: named,
+    needs: inspect,
     run: (argv, ctx) => printCommand(ctx, { environment: argv.env }),
   },
   {
@@ -304,7 +307,7 @@ const commands: (Command | Group)[] = [
         command: 'list',
         aliases: ['ls'],
         describe: 'List environments stored for a project',
-        needs: named,
+        needs: inspect,
         run: (_argv, ctx) => envListCommand(ctx),
       },
       {

@@ -28,10 +28,7 @@ export async function newKeyCommand(
   if (!keyDef) {
     throw new EnvManagerError(`Unknown key: ${keyName}. Available: ${KEYS.map(k => k.envName).join(', ')}`);
   }
-  if (!keyDef.acceptsOptions && Object.values(keyOptions).some(value => value !== undefined)) {
-    const supported = KEYS.filter(k => k.acceptsOptions).map(k => k.envName).join(', ');
-    throw new EnvManagerError(`--name, --credit, --unlimited, and --expiration are only supported for ${supported}.`);
-  }
+  keyDef.checkOptions(keyOptions);
 
   let project = await loadProject(ctx);
   if (!project.config.project) throw new EnvManagerError('.env is missing env-manager header. Run: env-manager init');

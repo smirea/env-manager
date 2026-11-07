@@ -52,16 +52,7 @@ type NormalizedOpenRouterOptions = {
   expiresAt: string | null;
 };
 
-export function normalizeOpenRouterOptions(
-  projectName: string,
-  options?: KeyOptions
-): NormalizedOpenRouterOptions {
-  const normalizedName = options?.name?.trim() || projectName;
-
-  if (normalizedName.length === 0) {
-    throw new EnvManagerError("OpenRouter key name cannot be empty.");
-  }
-
+function parseLimits(options?: KeyOptions): Omit<NormalizedOpenRouterOptions, "name"> {
   if (options?.unlimited === true && options.credit !== undefined) {
     throw new EnvManagerError(
       "OpenRouter credit and unlimited mode cannot both be set."
@@ -91,11 +82,11 @@ export function normalizeOpenRouterOptions(
     expiresAt = expiration;
   }
 
-  return {
-    name: normalizedName,
-    limit,
-    expiresAt,
-  };
+  return { limit, expiresAt };
+}
+
+export function normalizeOpenRouterOptions(projectName: string, options?: KeyOptions): NormalizedOpenRouterOptions {
+  return { name: options?.name?.trim() || projectName, ...parseLimits(options) };
 }
 
 async function promptCreditLimit(assumeYes: boolean): Promise<Pick<KeyOptions, "credit" | "unlimited">> {
@@ -118,14 +109,15 @@ export const openRouterKey: KeyDefinition = {
   envName: "OPENROUTER_API_KEY",
   description: "OpenRouter API key for model routing",
   schemaType: "string:format(/^sk-or-v1-/)",
-  acceptsOptions: true,
+  checkOptions(options) {
+    parseLimits(options);
+  },
 
   validate(key: string): boolean {
     return isValidOpenRouterApiKey(key);
   },
 
   async resolve(projectName: string, options: KeyOptions, assumeYes: boolean): Promise<string> {
-    normalizeOpenRouterOptions(projectName, options);
     const limit = options.credit === undefined && options.unlimited !== true
       ? await promptCreditLimit(assumeYes)
       : {};

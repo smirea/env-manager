@@ -9,6 +9,7 @@ const { downCommand } = await import('./down');
 const { envSetCommand } = await import('./env');
 const { generateCommand, generateFromEnvironment } = await import('./generate');
 const { collectInfo } = await import('./info');
+const { newKeyCommand } = await import('./new-key');
 
 describe('output versions', () => {
   test('bump only on mutation and stay out of .env', async () => {
@@ -243,6 +244,30 @@ describe('output versions', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('guards', () => {
+  test('down refuses to replace a .env that belongs to another project', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-guard-'));
+    try {
+      secrets.set('env-manager/other', { schema: '# env-manager: other\n\nFOO= # {string}\n', environments: { local: { values: 'FOO=x\n', syncDate: '2026-01-01T00:00:00Z' } } });
+      await writeFile(path.join(dir, 'package.json'), '{}\n');
+      await writeFile(path.join(dir, '.env'), '# env-manager: demo\n\nBAR= # {string}\n');
+      await expect(downCommand({ project: 'other', cwd: dir })).rejects.toThrow('.env project "demo" does not match --project "other"');
+      expect(await readFile(path.join(dir, '.env'), 'utf8')).toBe('# env-manager: demo\n\nBAR= # {string}\n');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('new-key rejects conflicting key options before reusing or creating a key', async () => {
+    secrets.set('env-manager/default', { schema: '# env-manager: default\n', values: "OPENROUTER_API_KEY='sk-or-v1-existing'" });
+    await expect(newKeyCommand({ project: 'demo', cwd: '/nonexistent' }, 'OPENROUTER_API_KEY', { credit: 5, unlimited: true, assumeYes: true }))
+      .rejects.toThrow('OpenRouter credit and unlimited mode cannot both be set.');
+    await expect(newKeyCommand({ project: 'demo', cwd: '/nonexistent' }, 'ANTHROPIC_API_KEY', { credit: 5 }))
+      .rejects.toThrow('only supported for OPENROUTER_API_KEY');
+    secrets.delete('env-manager/default');
   });
 });
 

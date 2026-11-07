@@ -316,6 +316,47 @@ describe('project lookup', () => {
   });
 });
 
+describe('guards', () => {
+  test('format and env-directive migration refuse invalid setups without writing', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      const legacy = '# env-manager: demo\n# env-manager local:true\nPORT=3000 # {int}\n';
+      await writeFile(join(cwd, '.env'), legacy);
+      const format = run(cwd, cli, 'format');
+      expect(format.code).toBe(1);
+      expect(format.stderr).toContain('Values format is not configured');
+      expect(await readFile(join(cwd, '.env'), 'utf8')).toBe(legacy);
+
+      await writeFile(join(cwd, '.env'), `${legacy}# env-manager env:\n`);
+      expect(run(cwd, cli, 'set', 'local', 'true').stderr).toContain('Invalid environment ""');
+    });
+  });
+
+  test('reserved names block storage use but not inspection or local work', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      await writeFile(join(cwd, 'package.json'), '{}\n');
+      await writeFile(join(cwd, '.env'), '# env-manager: global\n# env-manager local:true\nPORT=3000 # {int}\n');
+      expect(run(cwd, cli, 'check').code).toBe(0);
+      expect(run(cwd, cli, 'gen').code).toBe(0);
+      expect(run(cwd, cli, 'up', '--no-local').stderr).toContain('"global" is a reserved project name and cannot be used with up');
+      const print = run(cwd, cli, 'print', 'default', '--no-local');
+      expect(print.stderr).not.toContain('reserved');
+      expect(print.stderr).toContain('AWS region not configured');
+    });
+  });
+
+  test('info reports a missing header with exit 3 even when the directory name is not a valid project name', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      const dir = join(cwd, 'My App');
+      await mkdir(dir);
+      await writeFile(join(dir, 'package.json'), '{}\n');
+      await writeFile(join(dir, '.env'), '# env-manager local: true\nPORT=3000 # {int}\n');
+      const info = run(dir, cli, 'info');
+      expect(info.code).toBe(3);
+      expect(info.stderr).toContain('has no "# env-manager: <project>" header');
+    });
+  });
+});
+
 describe('info', () => {
   test('exits 3 without a setup and describes targets read-only', async () => {
     await withLocalCli(async (cwd, cli) => {

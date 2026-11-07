@@ -1,3 +1,4 @@
+import { EnvManagerError } from "../errors";
 import type { KeyDefinition } from "./index";
 
 function isValidAnthropicKey(key: string): boolean {
@@ -8,7 +9,11 @@ export const anthropicKey: KeyDefinition = {
   envName: "ANTHROPIC_API_KEY",
   description: "Anthropic/Claude API key for AI services",
   schemaType: "string:format(/^sk-ant-/)",
-  acceptsOptions: false,
+  checkOptions(options) {
+    if (Object.values(options).some(value => value !== undefined)) {
+      throw new EnvManagerError("--name, --credit, --unlimited, and --expiration are only supported for OPENROUTER_API_KEY.");
+    }
+  },
 
   validate(key: string): boolean {
     return isValidAnthropicKey(key);

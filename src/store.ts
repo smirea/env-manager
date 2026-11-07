@@ -49,11 +49,11 @@ async function getSecret(name: string): Promise<SecretPayload | null> {
   return await aws().getSecret(name) as SecretPayload | null;
 }
 
-export function validateProjectName(project: string, command: string): void {
+export function validateProjectName(project: string, command: string, options: { reserved: boolean }): void {
   if (!NAME_PATTERN.test(project)) {
     throw new EnvManagerError(`Invalid project name "${project}". Project names cannot include spaces or "|".`);
   }
-  if (RESERVED_PROJECT_NAMES.includes(project)) {
+  if (options.reserved && RESERVED_PROJECT_NAMES.includes(project)) {
     throw new EnvManagerError(`"${project}" is a reserved project name and cannot be used with ${command}`);
   }
 }

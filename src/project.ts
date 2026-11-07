@@ -49,7 +49,7 @@ export async function loadProject(ctx: CommandContext, content?: string): Promis
 // The env directive used to live in the tracked .env.
 export async function moveSelectionOutOfSchema(ctx: CommandContext, content: string): Promise<void> {
   const environment = readMetadata(content).environment;
-  if (!environment) return;
+  if (environment === null) return;
   const envPath = join(ctx.cwd, '.env');
   const schema = removeSelection(content);
   const selectorPath = join(ctx.cwd, selectorFile(parseRootConfig(schema, envPath)));

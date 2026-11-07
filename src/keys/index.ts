@@ -12,7 +12,7 @@ export interface KeyDefinition {
   envName: string;
   description: string;
   schemaType: string;
-  acceptsOptions: boolean;
+  checkOptions(options: KeyOptions): void;
   validate(key: string): boolean;
   resolve(projectName: string, options: KeyOptions, assumeYes: boolean): Promise<string>;
 }

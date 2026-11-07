@@ -5,7 +5,7 @@ import { EnvManagerError } from '../errors';
 import { readMetadata, validateEnvironmentName } from '../metadata';
 import { materialize } from '../outputs';
 import { envValuesEqual, parseEnvValues } from '../parser';
-import { loadProject, type CommandContext, type Project } from '../project';
+import { loadProject, parseProjectConfig, type CommandContext, type Project } from '../project';
 import { environmentNames, requireEnvironment, requireProject, type EnvironmentPayload } from '../store';
 import { assertValid } from '../validator';
 import { holdsSelection, parseValues, readSelection, renderSourceValues, writeSelection } from '../values';
@@ -36,6 +36,8 @@ export async function pullEnvironment(project: Project, environment: string, pay
 
 export async function downCommand(ctx: CommandContext, options: { environment?: string } = {}): Promise<void> {
   if (options.environment) validateEnvironmentName(options.environment);
+  const local = await readText(join(ctx.cwd, '.env'));
+  if (local !== null) parseProjectConfig(ctx, local);
   const secret = await requireProject(ctx.project);
   const project = await loadProject(ctx, secret.schema);
   const available = environmentNames(secret);
