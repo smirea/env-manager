@@ -7,7 +7,7 @@ import {
   resolveEnvironment,
 } from "../environment";
 import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
-import { parseEnvFile, parseEnvValues } from "../parser";
+import { formatHeaderLine, parseEnvFile, parseEnvValues, parseHeader } from "../parser";
 import { normalizeProjectSecret } from "../project-secret";
 import { promptLine } from "../prompt";
 import type { CommandContext, EnvVarSchema } from "../types";
@@ -205,11 +205,15 @@ export async function initCommand(
       return;
     }
   } else {
+    const adopting = !envContent.split('\n').some(line => parseHeader(line));
+    if (adopting) envContent = `${formatHeaderLine({ project: ctx.project, version: null })}\n\n${envContent}`;
     if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
     if (initValuesConfig) envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
     await planGeneration(ctx, envContent);
     await writeManagedFile(envPath, envContent);
-    console.log(`.env already exists at ${envPath}, skipping creation.`);
+    console.log(adopting
+      ? `Adopted existing .env as project "${ctx.project}" at ${envPath}.`
+      : `.env already exists at ${envPath}, skipping creation.`);
   }
 
   const restrictToNames = envAlreadyExists ? new Set(Object.keys(parseEnvValues(envContent))) : null;

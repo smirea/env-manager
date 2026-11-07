@@ -58,7 +58,10 @@ defined once and every target selected at least once; empty sections are valid.
 
 Monorepos always use root `.env.local` as their values/environment source. Child
 files are generated subsets with project, target, environment, and a relative
-`root` ownership pointer. Child commands resolve the root. AWS stores one root
+`root` ownership pointer. Child commands resolve the root. Lookup stops at the
+Git repository root (outside Git it checks only the current directory) and skips
+any `.env` without env-manager metadata. `init` never nests under a managed root
+and warns below the repository root. AWS stores one root
 schema and one values/files payload per environment.
 
 `check` validates config and all planned paths without writing. `check --strict`

@@ -165,6 +165,7 @@ SERVER_KEY= # {string}
 `);
       const source = '# env-manager env: staging\nCLIENT_KEY=client-secret\nSERVER_KEY=server-secret\n';
       await writeFile(join(cwd, '.env.local'), source);
+      git(cwd, 'init');
       expect(run(cwd, cli, 'gen', '--target', 'client').code).toBe(0);
       expect(await Bun.file(join(cwd, 'server/src/env.ts')).exists()).toBe(false);
       expect(await Bun.file(join(cwd, 'ios/Config/LocalSecrets.xcconfig')).exists()).toBe(false);
@@ -233,6 +234,84 @@ PORT=3000 # {int}
       const parentFile = run(cwd, cli, 'gen');
       expect(parentFile.stderr).toContain('.env:4: Cannot use output');
       expect(await Bun.file(join(cwd, 'client/src/env.ts')).exists()).toBe(false);
+    });
+  });
+});
+
+describe('project lookup', () => {
+  test('ignores non-env-manager files and never searches past the repository root or outside git', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      await mkdir(join(cwd, 'sub'));
+      await writeFile(join(cwd, '.env'), 'export PATH=/usr/bin\n');
+      git(cwd, 'init');
+      const unmanaged = run(join(cwd, 'sub'), cli, 'check');
+      expect(unmanaged.code).toBe(3);
+      expect(unmanaged.stderr).toContain('or its parents up to the repository root');
+      expect(unmanaged.stderr).toContain('/project/.env has no "# env-manager: <project>" header');
+      expect(await readFile(join(cwd, '.env'), 'utf8')).toBe('export PATH=/usr/bin\n');
+
+      await rm(join(cwd, '.git'), { recursive: true });
+      await writeFile(join(cwd, '.env'), '# env-manager: demo\n# env-manager local:true\nPORT=3000 # {int}\n');
+      const outsideGit = run(join(cwd, 'sub'), cli, 'check');
+      expect(outsideGit.code).toBe(3);
+      expect(outsideGit.stderr).toContain('outside a git repository only the current directory is searched');
+    });
+  });
+
+  test('uses the managed root above an unmanaged .env and warns about it', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      await writeFile(join(cwd, '.env'), '# env-manager: demo\n# env-manager local:true\nPORT=3000 # {int}\n');
+      await mkdir(join(cwd, 'web'));
+      await writeFile(join(cwd, 'web/.env'), 'NEXT_PUBLIC_X=1\n');
+      await writeFile(join(cwd, 'package.json'), '{}\n');
+      git(cwd, 'init');
+      const result = run(join(cwd, 'web'), cli, 'check');
+      expect(result.code).toBe(0);
+      expect(result.stderr).toContain('Warning: ignoring ');
+      expect(result.stderr).toContain('/web/.env: it has no env-manager metadata.');
+    });
+  });
+
+  test('project-name and clone commands refuse to guess before touching credentials', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      const rmResult = run(cwd, cli, 'rm');
+      expect(rmResult.code).toBe(3);
+      expect(rmResult.stderr).toContain('Pass --project <name>');
+      await writeFile(join(cwd, '.env'), 'FOO=bar\n');
+      const down = run(cwd, cli, 'down');
+      expect(down.code).toBe(3);
+      expect(down.stderr).toContain('down would overwrite');
+      expect(await readFile(join(cwd, '.env'), 'utf8')).toBe('FOO=bar\n');
+    });
+  });
+
+  test('init refuses to nest under a managed root', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      await writeFile(join(cwd, '.env'), '# env-manager: mono\n# env-manager local:true\n');
+      await mkdir(join(cwd, 'apps/web'), { recursive: true });
+      git(cwd, 'init');
+      const result = run(join(cwd, 'apps/web'), cli, 'init', '--local');
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('already manages it');
+      expect(result.stderr).toContain('# env-manager target: apps/web format=ts');
+      expect(await Bun.file(join(cwd, 'apps/web/.env')).exists()).toBe(false);
+    });
+  });
+
+  test('init creates below the repository root with a warning and adopts an unmanaged .env', async () => {
+    await withLocalCli(async (cwd, cli) => {
+      await writeFile(join(cwd, '.env'), 'export PATH=/usr/bin\n');
+      await mkdir(join(cwd, 'tool'));
+      await writeFile(join(cwd, 'tool/.env'), 'PORT=3000\n');
+      await writeFile(join(cwd, 'tool/package.json'), '{}\n');
+      git(cwd, 'init');
+      const result = run(join(cwd, 'tool'), cli, 'init', '--local');
+      expect(result.code).toBe(0);
+      expect(result.stderr).toContain('below the repository root');
+      expect(result.stdout).toContain('Adopted existing .env as project "tool"');
+      expect(await readFile(join(cwd, 'tool/.env'), 'utf8')).toBe('# env-manager: tool\n# env-manager local: true\n\nPORT=3000\n');
+      expect(await readFile(join(cwd, '.env'), 'utf8')).toBe('export PATH=/usr/bin\n');
+      expect(run(join(cwd, 'tool'), cli, 'info').code).toBe(0);
     });
   });
 });

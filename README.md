@@ -88,6 +88,23 @@ env-manager generate
 | `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) |
 | `new-key --list` | List available keys |
 
+### Project lookup
+
+Commands look for an env-manager `.env` in the current directory, then in each
+parent up to the Git repository root. Outside a Git repository, only the current
+directory counts, so a `~/.env` shell file never becomes a project. A `.env`
+without `# env-manager` metadata is never used: it is skipped with a warning
+when a managed root sits above it, and named in the error when no project is
+found. Commands that need a project exit with code 3 in that case. `print`, `rm`,
+`env list`, and `env rm` accept `--project` instead. `down` refuses to overwrite
+a `.env` it does not manage.
+
+`init` always works in the current directory. It fails when an env-manager
+`.env` above it already owns the directory; declare a target in that root
+instead. It warns when the directory is below the repository root, because
+monorepo subprojects belong in the root as targets. An existing `.env` without
+metadata is adopted by adding the project header.
+
 ### Git updates
 
 After a successful command, tracked files that were clean before the command and
@@ -105,7 +122,7 @@ The persistent `# env-manager local:true` setting also disables all Git updates.
 
 | Option | Description |
 |--------|-------------|
-| `-p, --project <name>` | Project name (default: `.env` header, then current directory name) |
+| `-p, --project <name>` | Project name (default: `.env` header, then the project directory name) |
 | `--local` / `--no-local` | Override project local mode for this invocation |
 | `--target <name>` | Generate only one declared target (`generate` and aliases) |
 | `--env <name>` | Render target values from a stored environment without selecting it (`generate` only) |
@@ -250,7 +267,7 @@ the schema, so switching environments never rewrites a committed reader.
 
 The root pointer is relative to the output file's directory. These are ownership
 headers, not declarations. Commands from child directories find the owning root
-through that pointer or by walking to the root `.env`. Broken or mismatched
+through that pointer or by walking up to the root `.env` (see Project lookup). Broken or mismatched
 ownership fails rather than turning the child into a new project.
 
 ## Project info

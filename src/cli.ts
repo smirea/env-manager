@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { parseRootConfig, formatRootConfig } from './config';
-import { resolveProjectRoot } from './project-root';
+import { isManagedEnvFile, locateProject, type ProjectLocation } from './project-root';
 import { findEnvironmentInContent, moveEnvironmentToValuesFile, removeEnvironmentFromContent } from './environment';
 import { withGitUpdates, writeManagedFile } from './git-updates';
 import yargs, { type Argv, type CommandModule } from 'yargs';
@@ -56,16 +56,103 @@ function withLocalOption<T>(yargs: Argv<T>): Argv<T & { local: boolean | undefin
   });
 }
 
+// What a command needs when no env-manager .env is found:
+// project: a local setup; named: a project name from --project; clone: a cwd
+// without a foreign .env to overwrite; init: creates one; none: nothing.
+type ProjectRequirement = 'project' | 'named' | 'clone' | 'init' | 'none';
+
+const PROJECT_REQUIREMENTS: Record<string, ProjectRequirement> = {
+  check: 'project',
+  info: 'project',
+  format: 'project',
+  up: 'project',
+  generate: 'project',
+  gen: 'project',
+  ts: 'project',
+  set: 'project',
+  'env set': 'project',
+  'new-key': 'project',
+  print: 'named',
+  rm: 'named',
+  'env list': 'named',
+  'env ls': 'named',
+  'env rm': 'named',
+  down: 'clone',
+  init: 'init',
+  list: 'none',
+  ls: 'none',
+  'global set': 'none',
+  'global get': 'none',
+  'global list': 'none',
+  'global ls': 'none',
+  'global rm': 'none',
+};
+
+type NoProject = Extract<ProjectLocation, { kind: 'none' }>;
+
+function describeSearch(location: NoProject): string {
+  if (!location.repoRoot) return `${location.start} (outside a git repository only the current directory is searched)`;
+  if (location.repoRoot === location.start) return location.start;
+  return `${location.start} or its parents up to the repository root ${location.repoRoot}`;
+}
+
+function missingProjectError(location: NoProject, requirement: ProjectRequirement): NotInitializedError {
+  const lines = [`No env-manager setup found in ${describeSearch(location)}.`];
+  for (const file of location.ignored) {
+    lines.push(`${file} has no "# env-manager: <project>" header, so it is not an env-manager file.`);
+  }
+  const ownEnv = join(location.start, '.env');
+  if (requirement === 'clone') lines.push(`down would overwrite ${ownEnv}. Move it away, or run env-manager init to adopt it.`);
+  else if (requirement === 'named') lines.push('Pass --project <name>, or run env-manager init.');
+  else if (location.ignored.includes(ownEnv)) lines.push('If it belongs to this project, run env-manager init to adopt it.');
+  else if (location.ignored.length) lines.push(`Run env-manager init in ${dirname(location.ignored.at(-1)!)} to adopt its .env, or here to start a separate project.`);
+  else lines.push('Run env-manager init.');
+  return new NotInitializedError(lines.join('\n'));
+}
+
+function checkInitLocation(location: ProjectLocation): void {
+  if (location.kind === 'managed') {
+    if (location.root === location.start) return;
+    throw new EnvManagerError([
+      `Cannot init in ${location.start}: ${join(location.root, '.env')} already manages it.`,
+      'Projects cannot be nested. Declare this directory as a target of that root instead:',
+      `  # env-manager target: ${relative(location.root, location.start)} format=ts`,
+      'then run env-manager generate from the root.',
+    ].join('\n'));
+  }
+  if (location.repoRoot && location.repoRoot !== location.start) {
+    console.warn(`Warning: initializing in ${location.start}, below the repository root ${location.repoRoot}. For subprojects of a monorepo, run env-manager init at the repository root and declare each subproject as a target.`);
+  }
+}
+
+function enterProject(commandName: string, argv: { project?: string; list?: boolean }): void {
+  const requirement = commandName === 'new-key' && argv.list ? 'none' : PROJECT_REQUIREMENTS[commandName];
+  if (!requirement) throw new Error(`No project requirement declared for command "${commandName}".`);
+  const location = locateProject(process.cwd());
+  if (requirement === 'init') return checkInitLocation(location);
+  if (location.kind === 'managed') {
+    for (const file of location.ignored) console.warn(`Warning: ignoring ${file}: it has no env-manager metadata.`);
+    process.chdir(location.root);
+    return;
+  }
+  if (requirement === 'none') return;
+  if (requirement === 'named' && argv.project !== undefined) return;
+  if (requirement === 'clone' && !location.ignored.includes(join(location.start, '.env'))) return;
+  throw missingProjectError(location, requirement);
+}
+
 function withCommandContext(command: CommandModule<any, any>): CommandModule<any, any> {
   return {
     ...command,
     handler: async (argv) => {
+      const commandName = argv._.map(String).join(' ');
+      enterProject(commandName, argv as ProjectArgs & { list?: boolean });
       const envPath = join(process.cwd(), '.env');
-      const original = await readFile(envPath, 'utf8').catch((error) => {
+      const existing = await readFile(envPath, 'utf8').catch((error) => {
         if (error.code === 'ENOENT') return undefined;
         throw error;
       });
-      const commandName = argv._.map(String).join(' ');
+      const original = existing !== undefined && isManagedEnvFile(existing) ? existing : undefined;
       const readOnly = commandName === 'check' || commandName === 'info';
       const misplacedEnvironment = original !== undefined && !readOnly ? findEnvironmentInContent(original) : null;
       const content = misplacedEnvironment ? removeEnvironmentFromContent(original!) : original;
@@ -763,7 +850,6 @@ const formatCmd: CommandModule<any, any> = {
 };
 
 async function run() {
-  process.chdir(resolveProjectRoot(process.cwd()));
   loadOwnEnv(resolveOwnPackageRoot(import.meta.url));
   const rootCommands: Array<CommandModule<any, any>> = [
     checkCmd,
