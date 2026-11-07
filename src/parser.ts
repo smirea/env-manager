@@ -1,5 +1,5 @@
 import { EnvManagerError } from "./errors";
-import { parseHeader } from "./metadata";
+import { readMetadata } from "./metadata";
 
 export const SCHEMA_TYPES = ["string", "int", "float", "bool", "url", "email", "file"] as const;
 export type SchemaType = (typeof SCHEMA_TYPES)[number];
@@ -158,7 +158,7 @@ function unescapeQuotedValue(value: string, quote: "'" | '"'): string {
   return result;
 }
 
-export function findInlineCommentIndex(value: string): number {
+function findInlineCommentIndex(value: string): number {
   let from = value.length - value.trimStart().length;
   const quote = value[from];
   if (quote === "'" || quote === '"') {
@@ -178,6 +178,7 @@ export function findInlineCommentIndex(value: string): number {
 export function parseEnvLine(line: string): {
   name: string;
   value: string | null;
+  rawValue: string;
   inlineComment: string | null;
 } | null {
   const match = line.match(ENV_LINE_PATTERN);
@@ -206,7 +207,7 @@ export function parseEnvLine(line: string): {
     value = rest;
   }
 
-  return { name, value, inlineComment };
+  return { name, value, rawValue: rest, inlineComment };
 }
 
 export function parseEnvFile(content: string): ParsedEnvFile {
@@ -259,15 +260,7 @@ export function parseEnvFile(content: string): ParsedEnvFile {
     }
   }
 
-  return { project: findProject(content), schema };
-}
-
-function findProject(content: string): string | null {
-  for (const line of content.split("\n")) {
-    const header = parseHeader(line);
-    if (header) return header.project;
-  }
-  return null;
+  return { project: readMetadata(content).project, schema };
 }
 
 export function parseEnvValues(content: string): EnvValues {
@@ -291,31 +284,14 @@ function escapeSingleQuotedValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-function formatLocalValue(value: string): string {
+export function formatLocalValue(value: string): string {
   if (NUMERIC_VALUE_PATTERN.test(value)) {
     return value;
   }
   return `'${escapeSingleQuotedValue(value)}'`;
 }
 
-export function generateLocalEnvContent(
-  schema: EnvVarSchema[],
-  values: EnvValues
-): string {
-  const lines: string[] = [];
-  const schemaNames = new Set(schema.map((entry) => entry.name));
-  for (const entry of schema) {
-    if (Object.hasOwn(values, entry.name)) {
-      lines.push(`${entry.name}=${formatLocalValue(values[entry.name])} ${formatSchemaComment(entry)}`);
-    }
-  }
-  for (const [name, value] of Object.entries(values)) {
-    if (!schemaNames.has(name)) lines.push(`${name}=${formatLocalValue(value)}`);
-  }
-  return lines.length === 0 ? "" : lines.join("\n") + "\n";
-}
-
-export function formatSchemaComment(s: EnvVarSchema): string {
+export function formatSchemaComment(s: Pick<EnvVarSchema, "type" | "optional" | "validators">): string {
   let inner = "";
   if (s.optional) inner += "optional ";
   inner += s.type;

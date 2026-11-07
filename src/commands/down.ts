@@ -2,13 +2,14 @@ import { join, relative } from 'node:path';
 import { writeFilesFromPayload } from '../file-sync';
 import { readText, writeManagedFile } from '../files';
 import { EnvManagerError } from '../errors';
+import { FORMATS } from '../formats';
 import { readMetadata, validateEnvironmentName } from '../metadata';
 import { materialize } from '../outputs';
 import { envValuesEqual, parseEnvValues } from '../parser';
 import { loadProject, parseProjectConfig, type CommandContext, type Project } from '../project';
 import { environmentNames, requireEnvironment, requireProject, type EnvironmentPayload } from '../store';
 import { assertValid } from '../validator';
-import { holdsSelection, parseValues, readSelection, renderSourceValues, writeSelection } from '../values';
+import { holdsSelection, readSelection, renderSourceValues, writeSelection } from '../values';
 
 export async function pullEnvironment(project: Project, environment: string, payload: EnvironmentPayload): Promise<void> {
   const { schema } = project.config;
@@ -26,7 +27,7 @@ export async function pullEnvironment(project: Project, environment: string, pay
   const stale = localVersion === null
     || localVersion < remoteVersion
     || (holdsSelection(project.values) && recorded !== environment)
-    || !envValuesEqual(parseValues(project.values.format, existing ?? ''), values);
+    || !envValuesEqual(FORMATS[project.values.format].parse(existing ?? ''), values);
   if (stale) {
     await writeManagedFile(valuesPath, renderSourceValues(project.name, project.values, schema, values, { environment, loadedFrom: environment }));
   }

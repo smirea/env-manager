@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseRootConfig } from './config';
 import type { EnvVarSchema } from './parser';
-import { parseValues, readSelection, renderValues, resolveValuesConfig, writeSelection, writeSourceValues } from './values';
+import { FORMATS } from './formats';
+import { readSelection, resolveValuesConfig, writeSelection, writeSourceValues } from './values';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-values-'));
@@ -44,15 +45,15 @@ describe('values config', () => {
 
 describe('swift values', () => {
   test('render in schema order with extras last and parse back, ignoring comments', () => {
-    const content = renderValues('swift', schema, { EXTRA: 'kept', GEMINI_API_KEY: 'gemini-secret', GIPHY_API_KEY: 'giphy-secret' });
+    const content = FORMATS.swift.render(schema, { EXTRA: 'kept', GEMINI_API_KEY: 'gemini-secret', GIPHY_API_KEY: 'giphy-secret' });
     expect(content).toBe('GIPHY_API_KEY = giphy-secret\nGEMINI_API_KEY = gemini-secret\nEXTRA = kept\n');
-    expect(parseValues('swift', `// local secrets\n${content}`)).toEqual({ GIPHY_API_KEY: 'giphy-secret', GEMINI_API_KEY: 'gemini-secret', EXTRA: 'kept' });
+    expect(FORMATS.swift.parse(`// local secrets\n${content}`)).toEqual({ GIPHY_API_KEY: 'giphy-secret', GEMINI_API_KEY: 'gemini-secret', EXTRA: 'kept' });
   });
 
   test('escape xcconfig comment delimiters in URLs and round-trip them', () => {
-    const content = renderValues('swift', [], { API_URL: 'https://example.com', TOKEN: 'abc//def' });
+    const content = FORMATS.swift.render([], { API_URL: 'https://example.com', TOKEN: 'abc//def' });
     expect(content).toBe('API_URL = https:/$()/example.com\nTOKEN = abc/$()/def\n');
-    expect(parseValues('swift', content)).toEqual({ API_URL: 'https://example.com', TOKEN: 'abc//def' });
+    expect(FORMATS.swift.parse(content)).toEqual({ API_URL: 'https://example.com', TOKEN: 'abc//def' });
   });
 });
 

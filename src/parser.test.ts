@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   envValuesEqual,
-  generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
   parseSchemaComment,
   serializeEnvValues,
   type Validator,
 } from "./parser";
+import { FORMATS } from "./formats";
 import { ensureHeader, parseHeader, setHeaderVersion } from "./metadata";
 
 type FormatValidator = Extract<Validator, { kind: "format" }>;
@@ -352,9 +352,9 @@ FOO=bar
 
 });
 
-describe("generateLocalEnvContent", () => {
+describe("ts values rendering", () => {
   test("adds schema comments and quotes non-numeric values", () => {
-    const content = generateLocalEnvContent(
+    const content = FORMATS.ts.render(
       [
         {
           name: "API_KEY",
@@ -405,7 +405,7 @@ ENABLED='true' # {bool}
   });
 
   test("keeps non-schema keys and round-trips escaped single quotes", () => {
-    const content = generateLocalEnvContent(
+    const content = FORMATS.ts.render(
       [
         {
           name: "NAME",

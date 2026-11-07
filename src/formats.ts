@@ -1,5 +1,5 @@
 import type { CommentPrefix } from './metadata';
-import { ENV_NAME_PATTERN, generateLocalEnvContent, parseEnvValues, type EnvValues, type EnvVarSchema } from './parser';
+import { ENV_NAME_PATTERN, formatLocalValue, formatSchemaComment, parseEnvValues, type EnvValues, type EnvVarSchema } from './parser';
 
 interface Format {
   defaultPath: string;
@@ -8,6 +8,23 @@ interface Format {
   holdsSelection: boolean;
   render(schema: EnvVarSchema[], values: EnvValues): string;
   parse(content: string): EnvValues;
+}
+
+function renderTs(
+  schema: EnvVarSchema[],
+  values: EnvValues
+): string {
+  const lines: string[] = [];
+  const schemaNames = new Set(schema.map((entry) => entry.name));
+  for (const entry of schema) {
+    if (Object.hasOwn(values, entry.name)) {
+      lines.push(`${entry.name}=${formatLocalValue(values[entry.name])} ${formatSchemaComment(entry)}`);
+    }
+  }
+  for (const [name, value] of Object.entries(values)) {
+    if (!schemaNames.has(name)) lines.push(`${name}=${formatLocalValue(value)}`);
+  }
+  return lines.length === 0 ? "" : lines.join("\n") + "\n";
 }
 
 function renderSwift(schema: EnvVarSchema[], values: EnvValues): string {
@@ -40,7 +57,7 @@ export const FORMATS = {
     commentPrefix: '#',
     reader: true,
     holdsSelection: true,
-    render: generateLocalEnvContent,
+    render: renderTs,
     parse: parseEnvValues,
   },
   swift: {

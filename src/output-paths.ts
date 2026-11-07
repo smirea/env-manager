@@ -1,7 +1,6 @@
 import { access, lstat, realpath, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { relativeOutput } from './config';
 import { configError, EnvManagerError } from './errors';
 import { readMetadata } from './metadata';
 
@@ -23,15 +22,14 @@ function inside(directory: string, path: string): boolean {
 
 export type OutputPath = { path: string; directory: string; line: number; target?: string; source?: boolean };
 
-export async function preflightPaths(projectRoot: string, project: string, outputs: OutputPath[], source: string): Promise<void> {
+export async function preflightPaths(projectRoot: string, project: string, outputs: OutputPath[]): Promise<void> {
   const file = join(projectRoot, '.env');
   const root = await realpath(projectRoot);
   const schemaPath = await physicalPath(file);
-  const sourcePath = await physicalPath(join(projectRoot, source)).catch(error => configError(file, 1, `Cannot resolve values source: ${error.message}`));
+  const sourcePath = await physicalPath(outputs.find(output => output.source)!.path).catch(error => configError(file, 1, `Cannot resolve values source: ${error.message}`));
   const seen = new Set<string>();
   for (const output of outputs) {
     try {
-      relativeOutput(relative(output.directory, output.path), file, output.line);
       const directory = await physicalPath(output.directory);
       const path = await physicalPath(output.path);
       if (!inside(root, directory) || !inside(directory, path)) configError(file, output.line, `Output "${output.path}" escapes ${output.target ?? 'project'} through a symlink.`);

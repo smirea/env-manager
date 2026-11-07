@@ -42,7 +42,7 @@ export async function loadProject(ctx: CommandContext, content?: string): Promis
   const config = parseProjectConfig(ctx, text);
   const values = await resolveValuesConfig(ctx.cwd, config);
   const outputs = planOutputs(ctx.cwd, config, values);
-  await preflightPaths(ctx.cwd, ctx.project, outputs, values.path);
+  await preflightPaths(ctx.cwd, ctx.project, outputs);
   return { name: ctx.project, root: ctx.cwd, envPath, content: text, config, values, outputs };
 }
 

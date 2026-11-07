@@ -1,5 +1,6 @@
 import { formatHeader, upsertSelection } from '../metadata';
-import { generateLocalEnvContent, parseEnvFile, parseEnvValues, schemaValue, type EnvValues, type EnvVarSchema } from '../parser';
+import { FORMATS } from '../formats';
+import { parseEnvFile, parseEnvValues, schemaValue, type EnvValues, type EnvVarSchema } from '../parser';
 import type { CommandContext } from '../project';
 import { environmentNames, requireEnvironment, requireProject, type EnvironmentPayload, type ProjectSecret } from '../store';
 
@@ -82,7 +83,7 @@ function formatEnvironmentPrintOutput(
   const parsed = parseEnvFile(schemaContent);
   const values = parseEnvValues(envPayload.values);
   const header = formatHeader('#', parsed.project ?? project, envPayload.outputs?.['.env.local']?.version ?? null);
-  const localEnvContent = upsertSelection(`${header}\n\n${generateLocalEnvContent(parsed.schema, values)}`, environment).trimEnd();
+  const localEnvContent = upsertSelection(`${header}\n\n${FORMATS.ts.render(parsed.schema, values)}`, environment).trimEnd();
   const fileContent = formatStoredFiles(
     collectStoredFiles(parsed.schema, values, envPayload.files)
   );

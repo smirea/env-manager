@@ -5,10 +5,10 @@ import { FORMATS, type OutputFormat } from './formats';
 import { readText, writeManagedFile } from './files';
 import { formatHeader, formatOwnership, metadataLines, readMetadata, upsertSourceMetadata, type CommentPrefix, type OutputVersion, type OutputVersions } from './metadata';
 import type { OutputPath } from './output-paths';
-import { envValuesEqual, parseEnvValues, schemaValue, selectValues, type EnvValues, type EnvVarSchema } from './parser';
+import { envValuesEqual, parseEnvLine, parseEnvValues, schemaValue, selectValues, type EnvValues, type EnvVarSchema } from './parser';
 import type { Project } from './project';
 import { assertValid, validateValue } from './validator';
-import { parseValues, readSelection, readValues, renderSourceValues, renderValues, type ValuesConfig } from './values';
+import { readSelection, readValues, renderSourceValues, type ValuesConfig } from './values';
 
 export const OVERRIDE_FILE = '.env.override';
 
@@ -98,7 +98,7 @@ function commentPrefix(output: PlannedOutput): CommentPrefix {
 
 function renderOutput(project: Project, output: PlannedOutput, values: EnvValues, environment: string, version: number | null): string {
   if (output.source) return renderSourceValues(project.name, project.values, output.schema, values, { environment });
-  const content = output.kind === 'reader' ? generateReader(output.schema) : renderValues(output.format, output.schema, values);
+  const content = output.kind === 'reader' ? generateReader(output.schema) : FORMATS[output.format].render(output.schema, values);
   if (!output.target) return `${formatHeader('//', project.name, version)}\n${content}`;
   return formatOwnership(commentPrefix(output), {
     project: project.name,
@@ -119,7 +119,7 @@ async function readOverrides(project: Project): Promise<EnvValues> {
   const overrides = parseEnvValues(content);
   const lines = content.split('\n');
   for (const [name, value] of Object.entries(overrides)) {
-    const line = lines.findIndex(l => new RegExp(`^\\s*${name}\\s*=`).test(l)) + 1;
+    const line = lines.findIndex(l => parseEnvLine(l.trim())?.name === name) + 1;
     const entry = project.config.schema.find(e => e.name === name);
     if (!entry) configError(path, line, `Unknown variable ${name}. Overrides must be declared in .env.`);
     const error = value === '' ? null : validateValue(entry, value);
@@ -139,14 +139,14 @@ function matchesRender(output: PlannedOutput, existing: string, rendered: string
     return fingerprint(existing) === fingerprint(rendered);
   }
   return metadataLines(existing).join('\n') === metadataLines(rendered).join('\n')
-    && envValuesEqual(parseValues(output.format, existing), parseValues(output.format, rendered));
+    && envValuesEqual(FORMATS[output.format].parse(existing), FORMATS[output.format].parse(rendered));
 }
 
 export function assertTarget(project: Project, target: string | undefined): void {
   if (target && !project.config.targets.some(t => t.name === target)) configError(project.envPath, 1, `Unknown target "${target}".`);
 }
 
-type MaterializeOptions = { target?: string; remote?: OutputVersions; createSource?: boolean };
+type MaterializeOptions = { target?: string; remote?: OutputVersions };
 
 export async function materialize(project: Project, options: MaterializeOptions = {}): Promise<OutputVersions> {
   assertTarget(project, options.target);
@@ -186,11 +186,9 @@ export async function materialize(project: Project, options: MaterializeOptions 
     }
   }
   const sourceKey = relative(project.root, source.path);
-  if (sourceContent !== null || options.createSource) {
-    const base = sourceContent ?? renderOutput(project, source, selectValues(source.schema, values), environment, null);
-    const written = await writeManagedFile(source.path, upsertSourceMetadata(base, commentPrefix(source), project.name, record[sourceKey].version, record));
-    if (written && sourceContent === null) console.log(`Generated ${sourceKey}`);
-  }
+  const base = sourceContent ?? renderOutput(project, source, selectValues(source.schema, values), environment, null);
+  const written = await writeManagedFile(source.path, upsertSourceMetadata(base, commentPrefix(source), project.name, record[sourceKey].version, record));
+  if (written && sourceContent === null) console.log(`Generated ${sourceKey}`);
   return record;
 }
 

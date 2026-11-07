@@ -31,7 +31,6 @@ export async function newKeyCommand(
   keyDef.checkOptions(keyOptions);
 
   let project = await loadProject(ctx);
-  if (!project.config.project) throw new EnvManagerError('.env is missing env-manager header. Run: env-manager init');
   if (!project.config.schema.some(entry => entry.name === keyName)) {
     if (project.config.targets.length) configError(project.envPath, 1, `Declare ${keyName} in a target selection before creating a key in a monorepo.`);
     console.log(`Adding ${keyName} to .env schema...`);

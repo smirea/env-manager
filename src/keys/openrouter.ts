@@ -122,8 +122,9 @@ export const openRouterKey: KeyDefinition = {
       ? await promptCreditLimit(assumeYes)
       : {};
     const normalized = normalizeOpenRouterOptions(projectName, { ...options, ...limit });
-    // env.ts validates every variable on import; only this key needs the management key.
+    // Imported lazily: env.ts reads process.env once, and cli.ts loads env-manager's own .env after static imports run.
     const { default: env } = await import("../env");
+    if (!env.OPENROUTER_MANAGEMENT_KEY) throw new EnvManagerError("OPENROUTER_MANAGEMENT_KEY is not set in env-manager's own .env.local.");
     const response = await fetch(OPENROUTER_CREATE_KEY_URL, {
       method: "POST",
       headers: {
@@ -161,11 +162,6 @@ export const openRouterKey: KeyDefinition = {
     if (!key) {
       throw new EnvManagerError(
         "OpenRouter key creation succeeded but no key was returned."
-      );
-    }
-    if (!isValidOpenRouterApiKey(key)) {
-      throw new EnvManagerError(
-        `OpenRouter returned an invalid key format: ${key.slice(0, 20)}...`
       );
     }
     return key;

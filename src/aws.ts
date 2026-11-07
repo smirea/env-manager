@@ -68,21 +68,18 @@ class AwsSdkAdapter {
   private readonly secrets = new SecretsManagerClient(clientConfig());
 
   async getSecret(name: string): Promise<unknown> {
+    let secretString: string | undefined;
     try {
-      const result = await this.secrets.send(
-        new GetSecretValueCommand({ SecretId: name })
-      );
-      if (!result.SecretString) {
-        throw new EnvManagerError('Secret is missing SecretString payload.');
-      }
-      try {
-        return JSON.parse(result.SecretString) as unknown;
-      } catch {
-        throw new EnvManagerError(`Secret ${name} is not valid JSON.`);
-      }
+      secretString = (await this.secrets.send(new GetSecretValueCommand({ SecretId: name }))).SecretString;
     } catch (error) {
       if (isResourceNotFound(error)) return null;
       throw new EnvManagerError(`Failed to get secret: ${formatAwsError(error)}`);
+    }
+    if (!secretString) throw new EnvManagerError(`Secret ${name} is missing its SecretString payload.`);
+    try {
+      return JSON.parse(secretString) as unknown;
+    } catch {
+      throw new EnvManagerError(`Secret ${name} is not valid JSON.`);
     }
   }
 

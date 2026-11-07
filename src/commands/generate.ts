@@ -41,7 +41,7 @@ export async function generateCommand(
   if (loadedFrom && loadedFrom !== environment) {
     console.warn(`Warning: generating "${environment}" outputs from values loaded for "${loadedFrom}". Run "env-manager down" to load ${environment}.`);
   }
-  await materialize(project, { target: options.target, createSource: true });
+  await materialize(project, { target: options.target });
   await writeManagedFile(envPath, content);
 }
 

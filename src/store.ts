@@ -1,6 +1,6 @@
 import { createAwsAdapter } from './aws';
 import { EnvManagerError } from './errors';
-import { DEFAULT_ENVIRONMENT, NAME_PATTERN, removeSelection, setHeaderVersion, validateEnvironmentName, type OutputVersions } from './metadata';
+import { DEFAULT_ENVIRONMENT, NAME_PATTERN, removeSelection, setHeaderVersion, type OutputVersions } from './metadata';
 import { appendSchemaEntry, parseEnvFile, parseEnvLine, parseEnvValues, serializeEnvValues, type EnvValues } from './parser';
 
 const GLOBAL_PROJECT = 'default';
@@ -88,7 +88,6 @@ export async function requireProject(project: string): Promise<ProjectSecret> {
 }
 
 export function requireEnvironment(secret: ProjectSecret, project: string, environment: string): EnvironmentPayload {
-  validateEnvironmentName(environment);
   const payload = Object.hasOwn(secret.environments, environment) ? secret.environments[environment] : undefined;
   if (!payload) {
     throw new EnvManagerError(`Environment "${environment}" not found for project "${project}". Available: ${environmentNames(secret).join(', ')}`);

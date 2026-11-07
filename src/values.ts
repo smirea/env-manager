@@ -38,16 +38,8 @@ export async function resolveValuesConfig(root: string, config: RootConfig): Pro
   return { format, path: config.path ?? FORMATS[format].defaultPath, selectorPath: selectorFile(config) };
 }
 
-export function parseValues(format: OutputFormat, content: string): EnvValues {
-  return FORMATS[format].parse(content);
-}
-
 export async function readValues(root: string, config: ValuesConfig): Promise<EnvValues> {
-  return parseValues(config.format, await readText(join(root, config.path)) ?? '');
-}
-
-export function renderValues(format: OutputFormat, schema: EnvVarSchema[], values: EnvValues): string {
-  return FORMATS[format].render(schema, values);
+  return FORMATS[config.format].parse(await readText(join(root, config.path)) ?? '');
 }
 
 export function renderSourceValues(
@@ -57,7 +49,7 @@ export function renderSourceValues(
   values: EnvValues,
   selection: { environment: string; loadedFrom?: string }
 ): string {
-  const body = renderValues(config.format, schema, values);
+  const body = FORMATS[config.format].render(schema, values);
   if (!holdsSelection(config)) return body;
   const header = formatHeader('#', project, null);
   return upsertSelection(body ? `${header}\n\n${body}` : `${header}\n`, selection.environment, selection.loadedFrom);

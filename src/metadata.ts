@@ -42,8 +42,20 @@ export function formatDirective(prefix: CommentPrefix, field: string, value: str
   return `${prefix} env-manager ${field}: ${value}`;
 }
 
+export function isDirectiveLine(line: string): boolean {
+  return /^(?:#|\/\/)\s*env-manager\b/.test(line.trim());
+}
+
 export function hasMetadata(content: string): boolean {
-  return /^(?:#|\/\/)\s*env-manager\b/m.test(content);
+  return content.split('\n').some(isDirectiveLine);
+}
+
+export function upsertDirective(content: string, fields: string[], line: string): string {
+  const lines = content.split('\n');
+  const existing = lines.findIndex(l => fields.includes(parseDirective(l)?.field ?? ''));
+  if (existing !== -1) lines[existing] = line;
+  else lines.splice(lines.findIndex(isHeader) + 1, 0, line);
+  return lines.join('\n');
 }
 
 // Anything after "|" that is not a version is a legacy sync date and is dropped.
@@ -116,18 +128,10 @@ export function removeSelection(content: string): string {
 
 export function upsertSelection(content: string, environment: string, loadedFrom?: string): string {
   validateEnvironmentName(environment);
-  const comment = formatDirective('#', 'env', environment);
-  let lines = content.split('\n');
-  const existing = lines.findIndex(line => isField(line, 'env'));
-  if (existing !== -1) lines[existing] = comment;
-  else {
-    const header = lines.findIndex(isHeader);
-    if (header === -1) lines.unshift(comment);
-    else lines.splice(header + 1, 0, comment);
-  }
-  if (loadedFrom === undefined) return lines.join('\n');
+  const updated = upsertDirective(content, ['env'], formatDirective('#', 'env', environment));
+  if (loadedFrom === undefined) return updated;
   validateEnvironmentName(loadedFrom);
-  lines = lines.filter(line => !isField(line, 'values env'));
+  const lines = updated.split('\n').filter(line => !isField(line, 'values env'));
   lines.splice(lines.findIndex(line => isField(line, 'env')) + 1, 0, formatDirective('#', 'values env', loadedFrom));
   return lines.join('\n');
 }

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { checkAwsCredentials } from '../aws';
 import { schemaForTarget, targetPaths } from '../config';
-import { NotInitializedError } from '../errors';
+import { EnvManagerError, NotInitializedError } from '../errors';
 import type { OutputFormat } from '../formats';
 import { readText } from '../files';
 import { OVERRIDE_FILE } from '../outputs';
@@ -53,7 +53,8 @@ export async function collectInfo(ctx: CommandContext, options: { local: boolean
       // down replaces .env with the stored schema, so callers need to know when that would rewrite it.
       storedSchema = !secret ? 'missing' : secret.schema === canonicalSchema(project.content) ? 'in-sync' : 'differs';
     } catch (error) {
-      environmentsError = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof EnvManagerError)) throw error;
+      environmentsError = error.message;
     }
   }
 

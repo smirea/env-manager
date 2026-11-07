@@ -1,8 +1,8 @@
 import { isAbsolute, join, normalize } from 'node:path';
 import { configError } from './errors';
 import { FORMATS, isOutputFormat, OUTPUT_FORMATS, type OutputFormat } from './formats';
-import { formatDirective, formatHeader, parseDirective, parseHeader } from './metadata';
-import { findInlineCommentIndex, formatSchemaComment, parseEnvFile, parseEnvLine, parseSchemaComment, type EnvVarSchema, type ParsedEnvFile } from './parser';
+import { formatDirective, formatHeader, isDirectiveLine, parseDirective, parseHeader, upsertDirective } from './metadata';
+import { formatSchemaComment, parseEnvFile, parseEnvLine, parseSchemaComment, type EnvVarSchema, type ParsedEnvFile } from './parser';
 import { validateValue } from './validator';
 
 export type Target = {
@@ -63,13 +63,13 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
   const targets: Target[] = [];
   const metadata = new Map<number, string>();
   const selections: { names: string[]; line: number }[] = [];
-  const names = new Set<string>();
+  const names = new Map<string, number>();
   let projectSeen = false;
 
   for (const [index, raw] of lines.entries()) {
     const line = index + 1;
     const text = raw.trim();
-    if (!/^#\s*env-manager\b/.test(text)) continue;
+    if (!isDirectiveLine(text)) continue;
     const header = parseHeader(text);
     if (header) {
       if (projectSeen) configError(file, line, 'Duplicate project header.');
@@ -78,7 +78,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
       continue;
     }
     const directive = parseDirective(text);
-    if (!directive?.field) configError(file, line, 'Malformed env-manager directive.');
+    if (!directive?.field || directive.prefix !== '#') configError(file, line, 'Malformed env-manager directive.');
     const { field, value } = directive;
     if (field === 'target') {
       const [name, ...fields] = value.split(/\s+/);
@@ -146,7 +146,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
     const variable = parseEnvLine(text);
     if (variable) {
       if (names.has(variable.name)) configError(file, line, `Duplicate variable "${variable.name}". Define it once and select shared targets.`);
-      names.add(variable.name);
+      names.set(variable.name, line);
       if (multi && !scope) configError(file, line, `Select targets before defining ${variable.name}.`);
       if (scope) scopes.set(variable.name, scope);
     } else if (text.trim() && !text.startsWith('#')) {
@@ -163,9 +163,8 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
   }
   const parsed = parseEnvFile(content);
   if (strict || modern) {
-    for (const name of names) {
+    for (const [name, line] of names) {
       if (!parsed.schema.some(s => s.name === name)) {
-        const line = lines.findIndex(l => parseEnvLine(l.trimStart())?.name === name) + 1;
         configError(file, line, `Variable ${name} needs a type annotation, for example # {string}.`);
       }
     }
@@ -199,15 +198,7 @@ export function schemaForTarget(config: RootConfig, name: string): EnvVarSchema[
 
 export function upsertSetting(content: string, field: SettingField, value: string): string {
   const aliases = SETTING_FIELDS.filter(alias => SETTINGS[alias] === SETTINGS[field]);
-  const lines = content.split('\n');
-  const existing = lines.findIndex(l => aliases.some(alias => parseDirective(l)?.field === alias));
-  const comment = formatDirective('#', field, value);
-  if (existing !== -1) lines[existing] = comment;
-  else {
-    const header = lines.findIndex(l => parseHeader(l) !== null);
-    lines.splice(header === -1 ? 0 : header + 1, 0, comment);
-  }
-  return lines.join('\n');
+  return upsertDirective(content, aliases, formatDirective('#', field, value));
 }
 
 export function formatRootConfig(content: string, file: string): string {
@@ -217,14 +208,11 @@ export function formatRootConfig(content: string, file: string): string {
     const text = raw.trimStart();
     const variable = parseEnvLine(text);
     if (variable) {
-      const rest = text.slice(text.indexOf('=') + 1);
-      const commentIndex = findInlineCommentIndex(rest);
-      const value = (commentIndex === -1 ? rest : rest.slice(0, commentIndex)).trim();
       const comment = variable.inlineComment;
       const schema = comment ? parseSchemaComment(comment) : null;
-      return `${variable.name}=${value}${comment ? ` ${schema ? formatSchemaComment({ ...schema, name: variable.name, defaultValue: null, lineNumber: index + 1 }) : comment.trimEnd()}` : ''}`;
+      return `${variable.name}=${variable.rawValue}${comment ? ` ${schema ? formatSchemaComment(schema) : comment.trimEnd()}` : ''}`;
     }
     const schema = parseSchemaComment(text);
-    return schema ? formatSchemaComment({ ...schema, name: '', defaultValue: null, lineNumber: index + 1 }) : raw;
+    return schema ? formatSchemaComment(schema) : raw;
   }).join('\n').trimEnd() + '\n';
 }
