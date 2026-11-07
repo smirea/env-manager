@@ -1,5 +1,6 @@
 import { DEFAULT_READER_PATH, relativeOutput, upsertSetting } from '../config';
 import { configError } from '../errors';
+import { FORMATS } from '../formats';
 import { writeManagedFile } from '../files';
 import { validateEnvironmentName } from '../metadata';
 import { assertTarget, materialize, renderEnvironment } from '../outputs';
@@ -18,17 +19,17 @@ export async function generateCommand(
   let content = project.content;
   if (!config.targets.length) {
     if (options.target) configError(envPath, 1, '--target requires target declarations.');
-    if (outputPath && project.values.format !== 'ts') configError(envPath, 1, 'A reader output path only works when values.format is "ts".');
+    if (outputPath && !FORMATS[project.values.format].reader) configError(envPath, 1, 'A reader output path only works when values.format is "ts".');
     if (outputPath) relativeOutput(outputPath, envPath, 1);
     if (outputPath && config.generate && outputPath !== config.generate && !options.force) configError(envPath, 1, `.env has ts path "${config.generate}" but "${outputPath}" was given. Pass --force to overwrite.`);
     if (!config.schema.length) configError(envPath, 1, 'No schema found in .env. Add schema comments like: # {string}');
-    if (project.values.format === 'ts' && (outputPath || config.generate || !config.modern)) {
+    if (FORMATS[project.values.format].reader && (outputPath || config.generate || !config.modern)) {
       content = upsertSetting(content, config.modern ? 'generate' : 'ts', outputPath ?? config.generate ?? DEFAULT_READER_PATH);
     }
   } else if (outputPath) {
     if (!options.target) configError(envPath, 1, 'Use --target <name> with a positional reader path in a monorepo.');
     const target = config.targets.find(t => t.name === options.target);
-    if (!target || target.format !== 'ts') configError(envPath, 1, 'A reader path requires a TypeScript target.');
+    if (!target?.generate) configError(envPath, 1, 'A reader path requires a TypeScript target.');
     const path = relativeOutput(outputPath, envPath, target.line);
     if (path !== target.generate && !options.force) configError(envPath, target.line, 'Pass --force to overwrite the target generation path.');
     const lines = content.split('\n');

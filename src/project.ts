@@ -46,7 +46,7 @@ export async function loadProject(ctx: CommandContext, content?: string): Promis
   return { name: ctx.project, root: ctx.cwd, envPath, content: text, config, values, outputs };
 }
 
-// The env directive used to live in the tracked .env; an existing one in the values file wins.
+// The env directive used to live in the tracked .env.
 export async function moveSelectionOutOfSchema(ctx: CommandContext, content: string): Promise<void> {
   const environment = readMetadata(content).environment;
   if (!environment) return;

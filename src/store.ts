@@ -1,11 +1,11 @@
-import { createAwsAdapter, type SecretPayload } from './aws';
+import { createAwsAdapter } from './aws';
 import { EnvManagerError } from './errors';
-import { DEFAULT_ENVIRONMENT, removeSelection, setHeaderVersion, validateEnvironmentName, type OutputVersions } from './metadata';
+import { DEFAULT_ENVIRONMENT, NAME_PATTERN, removeSelection, setHeaderVersion, validateEnvironmentName, type OutputVersions } from './metadata';
 import { appendSchemaEntry, parseEnvFile, parseEnvLine, parseEnvValues, serializeEnvValues, type EnvValues } from './parser';
 
-export const GLOBAL_PROJECT = 'default';
+const GLOBAL_PROJECT = 'default';
 export const GLOBAL_LABEL = 'global defaults';
-export const RESERVED_PROJECT_NAMES = [GLOBAL_PROJECT, 'global'];
+const RESERVED_PROJECT_NAMES = [GLOBAL_PROJECT, 'global'];
 
 const NAMESPACE = 'env-manager/';
 
@@ -21,13 +21,41 @@ export interface ProjectSecret {
   environments: Record<string, EnvironmentPayload>;
 }
 
+export interface SecretPayload {
+  schema: string;
+  environments?: Record<string, EnvironmentPayload>;
+  values?: string;
+  syncDate?: string;
+  files?: Record<string, string>;
+  locations?: Record<string, string>;
+}
+
 export interface GlobalDefaults {
   values: EnvValues;
   locations: Record<string, string>;
 }
 
+let adapter: ReturnType<typeof createAwsAdapter> | undefined;
+
+function aws() {
+  return adapter ??= createAwsAdapter();
+}
+
 function secretName(project: string): string {
   return `${NAMESPACE}${project}`;
+}
+
+async function getSecret(name: string): Promise<SecretPayload | null> {
+  return await aws().getSecret(name) as SecretPayload | null;
+}
+
+export function validateProjectName(project: string, command: string): void {
+  if (!NAME_PATTERN.test(project)) {
+    throw new EnvManagerError(`Invalid project name "${project}". Project names cannot include spaces or "|".`);
+  }
+  if (RESERVED_PROJECT_NAMES.includes(project)) {
+    throw new EnvManagerError(`"${project}" is a reserved project name and cannot be used with ${command}`);
+  }
 }
 
 export function canonicalSchema(content: string): string {
@@ -39,7 +67,7 @@ export function environmentNames(secret: ProjectSecret): string[] {
 }
 
 export async function readProject(project: string): Promise<ProjectSecret | null> {
-  const payload = await createAwsAdapter().getSecret(secretName(project));
+  const payload = await getSecret(secretName(project));
   if (!payload) return null;
   return {
     schema: canonicalSchema(payload.schema),
@@ -69,23 +97,23 @@ export function requireEnvironment(secret: ProjectSecret, project: string, envir
 }
 
 export async function writeProject(project: string, secret: ProjectSecret): Promise<void> {
-  await createAwsAdapter().putSecret(secretName(project), {
+  await aws().putSecret(secretName(project), {
     schema: canonicalSchema(secret.schema),
     environments: secret.environments,
   });
 }
 
 export async function deleteProject(project: string): Promise<boolean> {
-  return createAwsAdapter().deleteSecret(secretName(project));
+  return aws().deleteSecret(secretName(project));
 }
 
 export async function listProjects(): Promise<string[]> {
-  const names = await createAwsAdapter().listSecrets(NAMESPACE);
+  const names = await aws().listSecrets(NAMESPACE);
   return names.map(name => name.slice(NAMESPACE.length)).filter(name => name !== GLOBAL_PROJECT);
 }
 
 async function readGlobalPayload(): Promise<SecretPayload | null> {
-  return createAwsAdapter().getSecret(secretName(GLOBAL_PROJECT));
+  return getSecret(secretName(GLOBAL_PROJECT));
 }
 
 export async function readGlobals(): Promise<GlobalDefaults> {
@@ -123,7 +151,7 @@ async function writeGlobalPayload(
   locations: Record<string, string>,
   syncDate: string
 ): Promise<void> {
-  await createAwsAdapter().putSecret(secretName(GLOBAL_PROJECT), {
+  await aws().putSecret(secretName(GLOBAL_PROJECT), {
     schema,
     values: serializeEnvValues(values),
     syncDate,

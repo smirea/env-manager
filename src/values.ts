@@ -1,9 +1,10 @@
 import { join } from 'node:path';
-import { defaultValuesPath, type OutputFormat, type RootConfig } from './config';
+import type { RootConfig } from './config';
+import { FORMATS, type OutputFormat } from './formats';
 import { EnvManagerError } from './errors';
 import { readText, writeManagedFile } from './files';
 import { DEFAULT_ENVIRONMENT, formatHeader, readMetadata, upsertSelection, validateEnvironmentName } from './metadata';
-import { generateLocalEnvContent, parseEnvValues, type EnvValues, type EnvVarSchema } from './parser';
+import type { EnvValues, EnvVarSchema } from './parser';
 
 export interface ValuesConfig {
   format: OutputFormat;
@@ -17,21 +18,28 @@ export interface Selection {
   loadedFrom: string | null;
 }
 
+const ROOT_SELECTOR = '.env.local';
+
 export function selectorFile(config: RootConfig): string {
-  return config.targets.length || config.format === 'swift' ? '.env.local' : config.path ?? defaultValuesPath('ts');
+  if (config.targets.length || !FORMATS[config.format ?? 'ts'].holdsSelection) return ROOT_SELECTOR;
+  return config.path ?? FORMATS[config.format ?? 'ts'].defaultPath;
+}
+
+export function holdsSelection(config: ValuesConfig): boolean {
+  return config.selectorPath === config.path;
 }
 
 export async function resolveValuesConfig(root: string, config: RootConfig): Promise<ValuesConfig> {
-  if (config.targets.length) return { format: 'ts', path: '.env.local', selectorPath: selectorFile(config) };
+  if (config.targets.length) return { format: 'ts', path: ROOT_SELECTOR, selectorPath: selectorFile(config) };
   const format = config.format ?? (await Bun.file(join(root, 'package.json')).exists() ? 'ts' : undefined);
   if (!format) {
     throw new EnvManagerError(`${join(root, '.env')}:1: Values format is not configured and there is no package.json to infer ts. Run env-manager set format ts (or swift).`);
   }
-  return { format, path: config.path ?? defaultValuesPath(format), selectorPath: selectorFile(config) };
+  return { format, path: config.path ?? FORMATS[format].defaultPath, selectorPath: selectorFile(config) };
 }
 
 export function parseValues(format: OutputFormat, content: string): EnvValues {
-  return format === 'swift' ? parseSwiftValues(content) : parseEnvValues(content);
+  return FORMATS[format].parse(content);
 }
 
 export async function readValues(root: string, config: ValuesConfig): Promise<EnvValues> {
@@ -39,7 +47,7 @@ export async function readValues(root: string, config: ValuesConfig): Promise<En
 }
 
 export function renderValues(format: OutputFormat, schema: EnvVarSchema[], values: EnvValues): string {
-  return format === 'swift' ? generateSwiftValuesContent(schema, values) : generateLocalEnvContent(schema, values);
+  return FORMATS[format].render(schema, values);
 }
 
 export function renderSourceValues(
@@ -50,7 +58,7 @@ export function renderSourceValues(
   selection: { environment: string; loadedFrom?: string }
 ): string {
   const body = renderValues(config.format, schema, values);
-  if (config.format === 'swift') return body;
+  if (!holdsSelection(config)) return body;
   const header = formatHeader('#', project, null);
   return upsertSelection(body ? `${header}\n\n${body}` : `${header}\n`, selection.environment, selection.loadedFrom);
 }
@@ -68,28 +76,6 @@ export async function readSelection(root: string, config: ValuesConfig): Promise
 export async function writeSelection(root: string, config: ValuesConfig, environment: string, loadedFrom?: string): Promise<void> {
   const path = join(root, config.selectorPath);
   await writeManagedFile(path, upsertSelection(await readText(path) ?? '', environment, loadedFrom));
-}
-
-export function generateSwiftValuesContent(schema: EnvVarSchema[], values: EnvValues): string {
-  const schemaNames = new Set(schema.map((entry) => entry.name));
-  const names = [
-    ...schema.filter((entry) => Object.hasOwn(values, entry.name)).map((entry) => entry.name),
-    ...Object.keys(values).filter((name) => !schemaNames.has(name)),
-  ];
-  return names.map((name) => `${name} = ${values[name].replaceAll('//', '/$()/')}\n`).join('');
-}
-
-export function parseSwiftValues(content: string): EnvValues {
-  const values: EnvValues = {};
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '' || trimmed.startsWith('//') || trimmed.startsWith('#')) continue;
-    const match = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/i);
-    if (!match) continue;
-    const commentIdx = match[2].search(/\s+\/\//);
-    values[match[1]] = (commentIdx === -1 ? match[2] : match[2].slice(0, commentIdx)).trim().replaceAll('/$()/', '//');
-  }
-  return values;
 }
 
 export async function writeSourceValues(root: string, project: string, config: ValuesConfig, schema: EnvVarSchema[], values: EnvValues): Promise<void> {

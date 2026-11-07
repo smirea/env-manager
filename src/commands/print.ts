@@ -3,13 +3,13 @@ import { generateLocalEnvContent, parseEnvFile, parseEnvValues, schemaValue, typ
 import type { CommandContext } from '../project';
 import { environmentNames, requireEnvironment, requireProject, type EnvironmentPayload, type ProjectSecret } from '../store';
 
-export interface StoredFileEntry {
+interface StoredFileEntry {
   name: string;
   path: string;
   content: string | null;
 }
 
-export function collectStoredFiles(
+function collectStoredFiles(
   schema: EnvVarSchema[],
   values: EnvValues,
   storedFiles: Record<string, string> | undefined
@@ -96,7 +96,7 @@ function formatEnvironmentPrintOutput(
   ].join('\n\n');
 }
 
-export function formatProjectPrintOutput(
+function formatProjectPrintOutput(
   project: string,
   secret: ProjectSecret,
   options: { environment?: string } = {}

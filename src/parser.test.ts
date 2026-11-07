@@ -4,9 +4,7 @@ import {
   generateLocalEnvContent,
   parseEnvFile,
   parseEnvValues,
-  parseFormatRegex,
   parseSchemaComment,
-  parseValidators,
   serializeEnvValues,
   type Validator,
 } from "./parser";
@@ -133,61 +131,28 @@ describe("parseSchemaComment", () => {
   });
 });
 
-describe("parseValidators", () => {
-  test("parses min validator", () => {
-    expect(parseValidators("min(0)", "int")).toEqual([
-      { kind: "min", value: 0 },
-    ]);
-  });
+describe("schema validators", () => {
+  const validators = (comment: string) => parseSchemaComment(comment)?.validators;
 
-  test("parses negative min", () => {
-    expect(parseValidators("min(-100)", "int")).toEqual([
-      { kind: "min", value: -100 },
-    ]);
-  });
-
-  test("parses float min/max", () => {
-    expect(parseValidators("min(0.5),max(1.0)", "float")).toEqual([
+  test("parse numeric bounds including negatives and decimals", () => {
+    expect(validators("# {int:min(-100)}")).toEqual([{ kind: "min", value: -100 }]);
+    expect(validators("# {float:min(0.5),max(1.0)}")).toEqual([
       { kind: "min", value: 0.5 },
       { kind: "max", value: 1.0 },
     ]);
   });
 
-  test("parses format with flags", () => {
-    const result = parseValidators("format(/^test/i)", "string");
-    expect(result[0].kind).toBe("format");
-    expect((result[0] as FormatValidator).pattern.flags).toBe("i");
+  test("parse format regexes with flags", () => {
+    const [format] = validators("# {string:format(/test/gi)}") as FormatValidator[];
+    expect(format.pattern).toEqual(/test/gi);
   });
 
-  test("returns empty array for empty string", () => {
-    expect(parseValidators("", "string")).toEqual([]);
-  });
-
-  test("throws on unknown validator", () => {
-    expect(() => parseValidators("unknown(1)", "int")).toThrow();
-  });
-
-  test("throws on invalid validator for type", () => {
-    expect(() => parseValidators("min(1)", "string")).toThrow();
-    expect(() => parseValidators("format(/^x/)", "int")).toThrow();
-  });
-
-  test("throws on malformed validator string", () => {
-    expect(() => parseValidators("min(1),oops", "int")).toThrow();
-  });
-});
-
-describe("parseFormatRegex", () => {
-  test("parses simple regex", () => {
-    expect(parseFormatRegex("/^sk-/")).toEqual(/^sk-/);
-  });
-
-  test("parses regex with flags", () => {
-    expect(parseFormatRegex("/test/gi")).toEqual(/test/gi);
-  });
-
-  test("throws on invalid format", () => {
-    expect(() => parseFormatRegex("invalid")).toThrow();
+  test("reject unknown, mistyped and malformed validators", () => {
+    expect(() => parseSchemaComment("# {int:unknown(1)}")).toThrow("Invalid validator syntax");
+    expect(() => parseSchemaComment("# {string:min(1)}")).toThrow("min() is not valid for type string");
+    expect(() => parseSchemaComment("# {int:format(/^x/)}")).toThrow("format() is not valid for type int");
+    expect(() => parseSchemaComment("# {int:min(1),oops}")).toThrow("Invalid validator syntax");
+    expect(() => parseSchemaComment("# {string:format(invalid)}")).toThrow("Invalid regex format");
   });
 });
 

@@ -1,11 +1,12 @@
 import { EnvManagerError } from '../errors';
+import { ENV_NAME_PATTERN } from '../parser';
 import { ask } from '../prompt';
 import { GLOBAL_LABEL, readGlobals, removeGlobalValue, saveGlobalValue, type GlobalDefaults } from '../store';
 
 type GlobalEntry = { name: string; value: string; location: string };
 
 function ensureValidName(name: string): void {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+  if (!new RegExp(`^${ENV_NAME_PATTERN.source}$`, 'i').test(name)) {
     throw new EnvManagerError(`Invalid env var name "${name}". Use letters, numbers, and underscores.`);
   }
 }

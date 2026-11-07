@@ -8,9 +8,11 @@ import { formatRootConfig, parseRootConfig } from './config';
 import { EnvManagerError, NotInitializedError } from './errors';
 import { readText, withGitUpdates, writeManagedFile } from './files';
 import { hasMetadata, removeSelection } from './metadata';
+import { OUTPUT_FORMATS } from './formats';
 import { SCHEMA_TYPES } from './parser';
 import { loadProject, moveSelectionOutOfSchema, readEnvFile, type CommandContext } from './project';
-import { locateProject, resolveProjectName, validateProjectName, type ProjectLocation } from './project-root';
+import { locateProject, resolveProjectName, type ProjectLocation } from './project-root';
+import { validateProjectName } from './store';
 import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
 import { downCommand } from './commands/down';
 import { envListCommand, envRmCommand, envSetCommand } from './commands/env';
@@ -31,9 +33,6 @@ const HELP_FOOTER = `Supported schema formats:
   Optional: prefix any type with "optional"
   Example: # {optional string:format(/^sk-/)}`;
 
-// What a command needs when no env-manager .env is found:
-// project: a local setup; named: a project name from --project; clone: a cwd
-// without a foreign .env to overwrite; init: creates one; none: nothing.
 type ProjectNeed = 'project' | 'named' | 'clone' | 'init' | 'none';
 
 interface Needs {
@@ -119,7 +118,7 @@ function toModule(spec: Command, prefix: string): CommandModule<any, any> {
     builder: (y: Argv) => {
       const withBuilder = spec.builder ? spec.builder(y) : y;
       const projectScoped = typeof spec.needs === 'function' || spec.needs.project !== 'none';
-      return projectScoped && !spec.command.includes('[project]')
+      return projectScoped
         ? withBuilder.option('project', { alias: 'p', type: 'string', description: 'Project name (default: .env header, then directory name)' })
         : withBuilder;
     },
@@ -234,9 +233,7 @@ const commands: (Command | Group)[] = [
   {
     command: 'rm [project]',
     describe: 'Delete the project secret from AWS Secrets Manager without touching local files',
-    builder: y => y
-      .positional('project', { type: 'string', description: 'Project name' })
-      .option('project', { alias: 'p', type: 'string', description: 'Project name' }),
+    builder: y => y.positional('project', { type: 'string', description: 'Project name' }),
     needs: named,
     run: (_argv, ctx) => rmCommand(ctx),
   },
@@ -256,7 +253,7 @@ const commands: (Command | Group)[] = [
     describe: 'Initialize .env from AWS if it exists, otherwise create a new template',
     builder: y => y
       .option('yes', { alias: 'y', type: 'boolean', default: false, description: 'Accept defaults for prompts' })
-      .option('values-format', { type: 'string', choices: ['ts', 'swift'], description: 'Values output format' })
+      .option('values-format', { type: 'string', choices: OUTPUT_FORMATS, description: 'Values output format' })
       .option('values-path', { type: 'string', description: 'Values output path' }),
     needs: { project: 'init', storage: 'unless-local' },
     run: (argv, ctx) => initCommand(ctx, {
@@ -278,7 +275,6 @@ const commands: (Command | Group)[] = [
     describe: 'Print stored environments for a project',
     builder: y => y
       .positional('project', { type: 'string', description: 'Project name' })
-      .option('project', { alias: 'p', type: 'string', description: 'Project name' })
       .option('env', { alias: 'e', type: 'string', description: 'Only print one environment' }),
     needs: named,
     run: (argv, ctx) => printCommand(ctx, { environment: argv.env }),

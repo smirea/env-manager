@@ -9,20 +9,6 @@ import {
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import { EnvManagerError } from './errors';
 
-export interface SecretPayload {
-  schema: string;
-  environments?: Record<string, {
-    values: string;
-    syncDate: string;
-    files?: Record<string, string>;
-    outputs?: Record<string, { version: number; hash: string; date?: string }>;
-  }>;
-  values?: string;
-  syncDate?: string;
-  files?: Record<string, string>;
-  locations?: Record<string, string>;
-}
-
 function getAwsRegion(): string {
   const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
   if (!region) {
@@ -74,13 +60,14 @@ function isResourceNotFound(err: unknown): boolean {
   );
 }
 
-class AwsSdkAdapter {
-  private readonly secrets = new SecretsManagerClient({
-    region: getAwsRegion(),
-    credentials: getStaticCredentials() ?? undefined,
-  });
+function clientConfig() {
+  return { region: getAwsRegion(), credentials: getStaticCredentials() ?? undefined };
+}
 
-  async getSecret(name: string): Promise<SecretPayload | null> {
+class AwsSdkAdapter {
+  private readonly secrets = new SecretsManagerClient(clientConfig());
+
+  async getSecret(name: string): Promise<unknown> {
     try {
       const result = await this.secrets.send(
         new GetSecretValueCommand({ SecretId: name })
@@ -89,7 +76,7 @@ class AwsSdkAdapter {
         throw new EnvManagerError('Secret is missing SecretString payload.');
       }
       try {
-        return JSON.parse(result.SecretString) as SecretPayload;
+        return JSON.parse(result.SecretString) as unknown;
       } catch {
         throw new EnvManagerError(`Secret ${name} is not valid JSON.`);
       }
@@ -99,7 +86,7 @@ class AwsSdkAdapter {
     }
   }
 
-  async putSecret(name: string, payload: SecretPayload): Promise<void> {
+  async putSecret(name: string, payload: unknown): Promise<void> {
     const json = JSON.stringify(payload);
     try {
       try {
@@ -162,9 +149,7 @@ export function createAwsAdapter() {
 }
 
 export async function checkAwsCredentials(): Promise<void> {
-  const region = getAwsRegion();
-  const credentials = getStaticCredentials();
-  const sts = new STSClient({ region, credentials: credentials ?? undefined });
+  const sts = new STSClient(clientConfig());
   try {
     await sts.send(new GetCallerIdentityCommand({}));
   } catch (error) {

@@ -22,10 +22,10 @@ export interface FileMetadata {
   outputs: OutputVersions;
 }
 
-const LINE_PATTERN = /^(?:#|\/\/)\s*env-manager(\s+(?:values env|[\w.]+))?\s*:\s*(.*?)\s*$/;
+const LINE_PATTERN = /^(#|\/\/)\s*env-manager(\s+(?:values env|[\w.]+))?\s*:\s*(.*?)\s*$/;
 const HEADER_PATTERN = /^([^\s|]+)(?:\s*\|\s*(.+))?$/;
 const OUTPUT_PATTERN = /^(\S+)\s+v(\d+)\s+([0-9a-f]+)$/;
-const NAME_PATTERN = /^[^\s|]+$/;
+export const NAME_PATTERN = /^[^\s|]+$/;
 
 export function validateEnvironmentName(environment: string): void {
   if (!NAME_PATTERN.test(environment)) {
@@ -33,9 +33,13 @@ export function validateEnvironmentName(environment: string): void {
   }
 }
 
-function parseLine(line: string): { field: string; value: string } | null {
+export function parseDirective(line: string): { prefix: CommentPrefix; field: string; value: string } | null {
   const match = line.trim().match(LINE_PATTERN);
-  return match ? { field: match[1]?.trim() ?? '', value: match[2] } : null;
+  return match ? { prefix: match[1] as CommentPrefix, field: match[2]?.trim() ?? '', value: match[3] } : null;
+}
+
+export function formatDirective(prefix: CommentPrefix, field: string, value: string): string {
+  return `${prefix} env-manager ${field}: ${value}`;
 }
 
 export function hasMetadata(content: string): boolean {
@@ -44,7 +48,7 @@ export function hasMetadata(content: string): boolean {
 
 // Anything after "|" that is not a version is a legacy sync date and is dropped.
 export function parseHeader(line: string): { project: string; version: number | null } | null {
-  const parsed = parseLine(line);
+  const parsed = parseDirective(line);
   const match = parsed?.field === '' ? parsed.value.match(HEADER_PATTERN) : null;
   if (!match) return null;
   const version = match[2]?.trim().match(/^v(\d+)$/)?.[1];
@@ -57,7 +61,7 @@ export function readMetadata(content: string): FileMetadata {
   };
   let headerSeen = false;
   for (const line of content.split('\n')) {
-    const parsed = parseLine(line);
+    const parsed = parseDirective(line);
     if (!parsed) continue;
     const { field, value } = parsed;
     if (field === '' && !headerSeen) {
@@ -91,7 +95,7 @@ function isHeader(line: string): boolean {
 }
 
 function isField(line: string, field: string): boolean {
-  return parseLine(line)?.field === field;
+  return parseDirective(line)?.field === field;
 }
 
 export function setHeaderVersion(content: string, version: number | null): string {
@@ -112,19 +116,19 @@ export function removeSelection(content: string): string {
 
 export function upsertSelection(content: string, environment: string, loadedFrom?: string): string {
   validateEnvironmentName(environment);
-  const comment = `# env-manager env: ${environment}`;
+  const comment = formatDirective('#', 'env', environment);
   let lines = content.split('\n');
   const existing = lines.findIndex(line => isField(line, 'env'));
   if (existing !== -1) lines[existing] = comment;
   else {
-    const header = lines.findIndex(line => /^#\s*env-manager:/.test(line));
+    const header = lines.findIndex(isHeader);
     if (header === -1) lines.unshift(comment);
     else lines.splice(header + 1, 0, comment);
   }
   if (loadedFrom === undefined) return lines.join('\n');
   validateEnvironmentName(loadedFrom);
   lines = lines.filter(line => !isField(line, 'values env'));
-  lines.splice(lines.findIndex(line => isField(line, 'env')) + 1, 0, `# env-manager values env: ${loadedFrom}`);
+  lines.splice(lines.findIndex(line => isField(line, 'env')) + 1, 0, formatDirective('#', 'values env', loadedFrom));
   return lines.join('\n');
 }
 
@@ -138,7 +142,7 @@ export function upsertSourceMetadata(
   const lines = content.split('\n').filter(line => !isField(line, 'output'));
   const metadata = [
     formatHeader(prefix, project, version),
-    ...Object.keys(record).sort().map(key => `${prefix} env-manager output: ${key} v${record[key].version} ${record[key].hash}`),
+    ...Object.keys(record).sort().map(key => formatDirective(prefix, 'output', `${key} v${record[key].version} ${record[key].hash}`)),
   ];
   const header = lines.findIndex(isHeader);
   if (header === -1) lines.unshift(...metadata);
@@ -152,13 +156,13 @@ export function formatOwnership(
 ): string {
   return [
     formatHeader(prefix, owner.project, owner.version),
-    `${prefix} env-manager target: ${owner.target}`,
-    `${prefix} env-manager root: ${owner.root}`,
-    ...owner.environment === null ? [] : [`${prefix} env-manager env: ${owner.environment}`],
+    formatDirective(prefix, 'target', owner.target),
+    formatDirective(prefix, 'root', owner.root),
+    ...owner.environment === null ? [] : [formatDirective(prefix, 'env', owner.environment)],
     '',
   ].join('\n');
 }
 
 export function metadataLines(content: string): string[] {
-  return content.split('\n').filter(line => /^(?:#|\/\/)\s*env-manager[\s:]/.test(line));
+  return content.split('\n').filter(line => parseDirective(line) !== null);
 }

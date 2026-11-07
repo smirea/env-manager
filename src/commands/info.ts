@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import { checkAwsCredentials } from '../aws';
-import { schemaForTarget } from '../config';
+import { schemaForTarget, targetPaths } from '../config';
 import { NotInitializedError } from '../errors';
+import type { OutputFormat } from '../formats';
 import { readText } from '../files';
 import { OVERRIDE_FILE } from '../outputs';
 import { parseEnvValues } from '../parser';
@@ -19,10 +20,10 @@ export interface ProjectInfo {
   environments: string[] | null;
   environmentsError: string | null;
   storedSchema: 'in-sync' | 'differs' | 'missing' | null;
-  values: { path: string; format: 'ts' | 'swift'; exists: boolean };
+  values: { path: string; format: OutputFormat; exists: boolean };
   override: { path: string; variables: string[] } | null;
-  outputs: { target: string | null; kind: 'values' | 'reader'; format: 'ts' | 'swift'; path: string; exists: boolean }[];
-  targets: { name: string; directory: string; format: 'ts' | 'swift'; values: string; reader: string | null; variables: string[] }[];
+  outputs: { target: string | null; kind: 'values' | 'reader'; format: OutputFormat; path: string; exists: boolean }[];
+  targets: { name: string; directory: string; format: OutputFormat; values: string; reader: string | null; variables: string[] }[];
   variables: { name: string; type: string; optional: boolean; default: string | null; targets: string[] | null }[];
 }
 
@@ -75,10 +76,8 @@ export async function collectInfo(ctx: CommandContext, options: { local: boolean
     outputs,
     targets: config.targets.map(target => ({
       name: target.name,
-      directory: join(project.root, target.name),
       format: target.format,
-      values: join(project.root, target.name, target.path),
-      reader: target.generate ? join(project.root, target.name, target.generate) : null,
+      ...targetPaths(project.root, target),
       variables: schemaForTarget(config, target.name).map(s => s.name),
     })),
     variables: config.schema.map(entry => ({

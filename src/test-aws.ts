@@ -1,5 +1,5 @@
 import { mock } from 'bun:test';
-import type { SecretPayload } from './aws';
+import type { SecretPayload } from './store';
 
 export const secrets = new Map<string, SecretPayload>();
 export const puts: SecretPayload[] = [];

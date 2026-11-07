@@ -25,10 +25,12 @@ export interface ParsedEnvFile {
 
 export type EnvValues = Record<string, string>;
 
+export const ENV_NAME_PATTERN = /[A-Z_][A-Z0-9_]*/i;
+const ENV_LINE_PATTERN = new RegExp(`^(${ENV_NAME_PATTERN.source})\\s*=(.*)$`, "i");
 export const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 const SCHEMA_TYPE_PATTERN = new RegExp(`^(optional\\s+)?(${SCHEMA_TYPES.join("|")})(?::(.+))?$`);
 
-export function parseFormatRegex(formatStr: string): RegExp {
+function parseFormatRegex(formatStr: string): RegExp {
   const match = formatStr.match(/^\/(.+)\/([gimsuy]*)$/);
   if (!match) throw new EnvManagerError(`Invalid regex format: ${formatStr}`);
   try {
@@ -38,7 +40,7 @@ export function parseFormatRegex(formatStr: string): RegExp {
   }
 }
 
-export function parseValidators(
+function parseValidators(
   validatorStr: string,
   type: SchemaType
 ): Validator[] {
@@ -156,8 +158,6 @@ function unescapeQuotedValue(value: string, quote: "'" | '"'): string {
   return result;
 }
 
-// Quotes only delimit a value when they open it, so apostrophes inside an unquoted
-// value like O'Brien do not swallow the inline schema comment.
 export function findInlineCommentIndex(value: string): number {
   let from = value.length - value.trimStart().length;
   const quote = value[from];
@@ -180,7 +180,7 @@ export function parseEnvLine(line: string): {
   value: string | null;
   inlineComment: string | null;
 } | null {
-  const match = line.match(/^([A-Z_][A-Z0-9_]*)\s*=(.*)$/i);
+  const match = line.match(ENV_LINE_PATTERN);
   if (!match) return null;
 
   const name = match[1];
@@ -280,7 +280,7 @@ export function parseEnvValues(content: string): EnvValues {
 }
 
 export function schemaValue(entry: EnvVarSchema, values: EnvValues): string | null {
-  return values[entry.name] ?? entry.defaultValue;
+  return (values[entry.name] ?? entry.defaultValue) || null;
 }
 
 export function selectValues(schema: EnvVarSchema[], values: EnvValues): EnvValues {

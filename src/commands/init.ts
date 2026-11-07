@@ -1,4 +1,5 @@
-import { defaultValuesPath, upsertSetting } from '../config';
+import { upsertSetting } from '../config';
+import { FORMATS, isOutputFormat, OUTPUT_FORMATS, type OutputFormat } from '../formats';
 import { EnvManagerError } from '../errors';
 import { readText, writeManagedFile } from '../files';
 import { formatHeader } from '../metadata';
@@ -22,14 +23,14 @@ type InitOptions = {
   valuesPath?: string;
 };
 
-type Settings = { format?: 'ts' | 'swift'; path?: string; local: boolean };
+type Settings = { format?: OutputFormat; path?: string; local: boolean };
 
 function parseSettings(options: InitOptions): Settings {
   if (options.valuesFormat === undefined && options.valuesPath === undefined) return { local: options.local === true };
   const format = options.valuesFormat;
   if (!format) throw new EnvManagerError('Use --values-format with --values-path.');
-  if (format !== 'ts' && format !== 'swift') throw new EnvManagerError('Values format must be ts or swift.');
-  return { format, path: options.valuesPath ?? defaultValuesPath(format), local: options.local === true };
+  if (!isOutputFormat(format)) throw new EnvManagerError(`Values format must be ${OUTPUT_FORMATS.join(' or ')}.`);
+  return { format, path: options.valuesPath ?? FORMATS[format].defaultPath, local: options.local === true };
 }
 
 function applySettings(content: string, settings: Settings): string {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { EnvVarSchema } from './parser';
-import { validateEnv, validateValue } from './validator';
+import { assertValid, validateValue } from './validator';
 
 function entry(type: EnvVarSchema['type'], overrides: Partial<EnvVarSchema> = {}): EnvVarSchema {
   return { name: 'VAR', type, optional: false, validators: [], defaultValue: null, lineNumber: 1, ...overrides };
@@ -40,14 +40,16 @@ describe('validateValue', () => {
   });
 });
 
-describe('validateEnv', () => {
+describe('assertValid', () => {
   test('requires non-optional values, falling back to schema defaults', () => {
     const schema = [
       entry('string', { name: 'REQUIRED' }),
       entry('string', { name: 'OPTIONAL', optional: true }),
       entry('int', { name: 'DEFAULTED', defaultValue: '3' }),
     ];
-    expect(validateEnv(schema, { REQUIRED: '' })).toEqual([{ varName: 'REQUIRED', message: 'Required variable REQUIRED is not set' }]);
-    expect(validateEnv(schema, { REQUIRED: 'x' })).toEqual([]);
+    expect(() => assertValid(schema, { REQUIRED: '', DEFAULTED: 'x' })).toThrow(
+      'Validation failed:\n  REQUIRED: Required variable REQUIRED is not set\n  DEFAULTED: Cannot parse "x" as int'
+    );
+    expect(() => assertValid(schema, { REQUIRED: 'x' })).not.toThrow();
   });
 });

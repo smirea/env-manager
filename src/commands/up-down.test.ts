@@ -190,6 +190,15 @@ describe('output versions', () => {
       });
     });
 
+    test('rejects environment names with spaces or pipes before touching files', async () => {
+      await withProject(async (ctx, read) => {
+        for (const name of ['two words', 'a|b']) {
+          await expect(envSetCommand(ctx, name)).rejects.toThrow(`Invalid environment "${name}". Environment names cannot include spaces or "|".`);
+        }
+        expect(await read('.env.local')).toBe('# env-manager env: dev\n');
+      });
+    });
+
     test('up refuses values left over from a local-mode switch', async () => {
       await withProject(async (ctx, read) => {
         await upCommand(ctx);

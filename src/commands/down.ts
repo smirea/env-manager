@@ -8,7 +8,7 @@ import { envValuesEqual, parseEnvValues } from '../parser';
 import { loadProject, type CommandContext, type Project } from '../project';
 import { environmentNames, requireEnvironment, requireProject, type EnvironmentPayload } from '../store';
 import { assertValid } from '../validator';
-import { parseValues, readSelection, renderSourceValues, writeSelection } from '../values';
+import { holdsSelection, parseValues, readSelection, renderSourceValues, writeSelection } from '../values';
 
 export async function pullEnvironment(project: Project, environment: string, payload: EnvironmentPayload): Promise<void> {
   const { schema } = project.config;
@@ -25,7 +25,7 @@ export async function pullEnvironment(project: Project, environment: string, pay
   const { recorded } = await readSelection(project.root, project.values);
   const stale = localVersion === null
     || localVersion < remoteVersion
-    || (project.values.format === 'ts' && recorded !== environment)
+    || (holdsSelection(project.values) && recorded !== environment)
     || !envValuesEqual(parseValues(project.values.format, existing ?? ''), values);
   if (stale) {
     await writeManagedFile(valuesPath, renderSourceValues(project.name, project.values, schema, values, { environment, loadedFrom: environment }));

@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { collectFilePayload, writeFilesFromPayload } from "./file-sync";
 import type { EnvVarSchema } from "./parser";
-import { EnvManagerError } from "./errors";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "env-manager-"));
@@ -56,7 +55,7 @@ describe("file sync", () => {
     await withTempDir(async (dir) => {
       await expect(
         collectFilePayload([fileSchema()], {}, dir)
-      ).rejects.toThrow(EnvManagerError);
+      ).rejects.toThrow("Required file path CERT is not set");
     });
   });
 
@@ -66,7 +65,7 @@ describe("file sync", () => {
       await writeFile(path.join(dir, "cert.pem"), binary);
       await expect(
         collectFilePayload([fileSchema()], { CERT: "cert.pem" }, dir)
-      ).rejects.toThrow(EnvManagerError);
+      ).rejects.toThrow(`File for CERT is not valid UTF-8: ${path.join(dir, "cert.pem")}`);
     });
   });
 
@@ -90,18 +89,14 @@ describe("file sync", () => {
     await withTempDir(async (dir) => {
       await expect(
         writeFilesFromPayload([fileSchema()], { CERT: "cert.pem" }, {}, dir)
-      ).rejects.toThrow(EnvManagerError);
+      ).rejects.toThrow("Missing file contents for CERT in secret");
     });
   });
 
-  test("writeFilesFromPayload skips optional when path missing", async () => {
+  test("writeFilesFromPayload skips optional files without a path", async () => {
     await withTempDir(async (dir) => {
-      await writeFilesFromPayload(
-        [fileSchema({ optional: true })],
-        {},
-        undefined,
-        dir
-      );
+      await writeFilesFromPayload([fileSchema({ optional: true })], { CERT: "" }, undefined, dir);
+      expect(await readdir(dir)).toEqual([]);
     });
   });
 });

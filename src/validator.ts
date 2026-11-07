@@ -1,12 +1,12 @@
 import { EnvManagerError } from './errors';
 import { NUMERIC_VALUE_PATTERN, schemaValue, type EnvValues, type EnvVarSchema } from './parser';
 
-export interface ValidationError {
+interface ValidationError {
   varName: string;
   message: string;
 }
 
-export function coerceValue(value: string, type: EnvVarSchema['type']): string | number | boolean {
+function coerceValue(value: string, type: EnvVarSchema['type']): string | number | boolean {
   const trimmed = value.trim();
   switch (type) {
     case 'string':
@@ -57,7 +57,7 @@ export function validateValue(entry: EnvVarSchema, value: string): string | null
   return null;
 }
 
-export function validateEnv(schema: EnvVarSchema[], values: EnvValues): ValidationError[] {
+function validateEnv(schema: EnvVarSchema[], values: EnvValues): ValidationError[] {
   const errors: ValidationError[] = [];
   for (const entry of schema) {
     const value = schemaValue(entry, values);

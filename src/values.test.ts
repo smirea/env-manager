@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseRootConfig } from './config';
 import type { EnvVarSchema } from './parser';
-import { generateSwiftValuesContent, parseSwiftValues, readSelection, resolveValuesConfig, writeSelection, writeSourceValues } from './values';
+import { parseValues, readSelection, renderValues, resolveValuesConfig, writeSelection, writeSourceValues } from './values';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-values-'));
@@ -44,15 +44,15 @@ describe('values config', () => {
 
 describe('swift values', () => {
   test('render in schema order with extras last and parse back, ignoring comments', () => {
-    const content = generateSwiftValuesContent(schema, { EXTRA: 'kept', GEMINI_API_KEY: 'gemini-secret', GIPHY_API_KEY: 'giphy-secret' });
+    const content = renderValues('swift', schema, { EXTRA: 'kept', GEMINI_API_KEY: 'gemini-secret', GIPHY_API_KEY: 'giphy-secret' });
     expect(content).toBe('GIPHY_API_KEY = giphy-secret\nGEMINI_API_KEY = gemini-secret\nEXTRA = kept\n');
-    expect(parseSwiftValues(`// local secrets\n${content}`)).toEqual({ GIPHY_API_KEY: 'giphy-secret', GEMINI_API_KEY: 'gemini-secret', EXTRA: 'kept' });
+    expect(parseValues('swift', `// local secrets\n${content}`)).toEqual({ GIPHY_API_KEY: 'giphy-secret', GEMINI_API_KEY: 'gemini-secret', EXTRA: 'kept' });
   });
 
   test('escape xcconfig comment delimiters in URLs and round-trip them', () => {
-    const content = generateSwiftValuesContent([], { API_URL: 'https://example.com', TOKEN: 'abc//def' });
+    const content = renderValues('swift', [], { API_URL: 'https://example.com', TOKEN: 'abc//def' });
     expect(content).toBe('API_URL = https:/$()/example.com\nTOKEN = abc/$()/def\n');
-    expect(parseSwiftValues(content)).toEqual({ API_URL: 'https://example.com', TOKEN: 'abc//def' });
+    expect(parseValues('swift', content)).toEqual({ API_URL: 'https://example.com', TOKEN: 'abc//def' });
   });
 });
 
