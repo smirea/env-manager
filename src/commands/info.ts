@@ -1,12 +1,13 @@
 import { join } from 'node:path';
+import { checkAwsCredentials } from '../aws';
 import { schemaForTarget } from '../config';
-import { checkAwsCredentials, createAwsAdapter, secretName } from '../aws';
-import { findValuesEnvironment, resolveEnvironment } from '../environment';
+import { NotInitializedError } from '../errors';
+import { readText } from '../files';
+import { OVERRIDE_FILE } from '../outputs';
 import { parseEnvValues } from '../parser';
-import { listProjectEnvironments, normalizeProjectSecret } from '../project-secret';
-import type { CommandContext } from '../types';
-import { NotInitializedError } from '../types';
-import { OVERRIDE_FILE, planGeneration } from './generate';
+import { loadProject, type CommandContext } from '../project';
+import { canonicalSchema, environmentNames, readProject } from '../store';
+import { readSelection } from '../values';
 
 export interface ProjectInfo {
   initialized: true;
@@ -26,16 +27,11 @@ export interface ProjectInfo {
 }
 
 export async function collectInfo(ctx: CommandContext, options: { local: boolean }): Promise<ProjectInfo> {
-  const envFile = Bun.file(join(ctx.cwd, '.env'));
-  const content = (await envFile.exists()) ? await envFile.text() : null;
-  if (content === null) throw new NotInitializedError(`No env-manager setup: ${ctx.cwd}/.env does not exist. Run env-manager init.`);
-  const plan = await planGeneration(ctx, content);
-  if (!plan.config.header) throw new NotInitializedError(`No env-manager setup: ${ctx.cwd}/.env has no "# env-manager: <project>" header. Run env-manager init.`);
+  const project = await loadProject(ctx);
+  const { config, values } = project;
+  if (!config.project) throw new NotInitializedError(`No env-manager setup: ${project.envPath} has no "# env-manager: <project>" header. Run env-manager init.`);
 
-  const { config, valuesConfig } = plan;
-  const valuesPath = valuesConfig.format === 'ts' ? valuesConfig.path : undefined;
-  const overrideFile = Bun.file(join(ctx.cwd, OVERRIDE_FILE));
-  const outputs = await Promise.all(plan.outputs.map(async output => ({
+  const outputs = await Promise.all(project.outputs.map(async output => ({
     target: output.target ?? null,
     kind: output.kind,
     format: output.format,
@@ -51,44 +47,38 @@ export async function collectInfo(ctx: CommandContext, options: { local: boolean
   } else {
     try {
       await checkAwsCredentials();
-      const secret = await createAwsAdapter().getSecret(secretName(ctx.project));
-      environments = secret ? listProjectEnvironments(secret) : [];
+      const secret = await readProject(ctx.project);
+      environments = secret ? environmentNames(secret) : [];
       // down replaces .env with the stored schema, so callers need to know when that would rewrite it.
-      storedSchema = !secret ? 'missing'
-        : normalizeProjectSecret(secret).schema === normalizeProjectSecret({ schema: content }).schema ? 'in-sync' : 'differs';
+      storedSchema = !secret ? 'missing' : secret.schema === canonicalSchema(project.content) ? 'in-sync' : 'differs';
     } catch (error) {
       environmentsError = error instanceof Error ? error.message : String(error);
     }
   }
 
+  const selection = await readSelection(project.root, values);
+  const valuesPath = join(project.root, values.path);
+  const overridePath = join(project.root, OVERRIDE_FILE);
+  const override = await readText(overridePath);
   return {
     initialized: true,
-    root: ctx.cwd,
-    project: ctx.project,
+    root: project.root,
+    project: project.name,
     local: options.local,
     mode: config.targets.length ? 'targets' : 'single',
-    environment: {
-      current: await resolveEnvironment(ctx.cwd, { valuesPath }),
-      valuesLoadedFrom: await findValuesEnvironment(ctx.cwd, { valuesPath }),
-    },
+    environment: { current: selection.environment, valuesLoadedFrom: selection.loadedFrom },
     environments,
     environmentsError,
     storedSchema,
-    values: {
-      path: join(ctx.cwd, valuesConfig.path),
-      format: valuesConfig.format,
-      exists: outputs.some(o => o.path === join(ctx.cwd, valuesConfig.path) && o.exists),
-    },
-    override: (await overrideFile.exists())
-      ? { path: join(ctx.cwd, OVERRIDE_FILE), variables: Object.keys(parseEnvValues(await overrideFile.text())) }
-      : null,
+    values: { path: valuesPath, format: values.format, exists: await Bun.file(valuesPath).exists() },
+    override: override === null ? null : { path: overridePath, variables: Object.keys(parseEnvValues(override)) },
     outputs,
     targets: config.targets.map(target => ({
       name: target.name,
-      directory: join(ctx.cwd, target.name),
+      directory: join(project.root, target.name),
       format: target.format,
-      values: join(ctx.cwd, target.name, target.path),
-      reader: target.generate ? join(ctx.cwd, target.name, target.generate) : null,
+      values: join(project.root, target.name, target.path),
+      reader: target.generate ? join(project.root, target.name, target.generate) : null,
       variables: schemaForTarget(config, target.name).map(s => s.name),
     })),
     variables: config.schema.map(entry => ({

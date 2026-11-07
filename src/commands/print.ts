@@ -1,34 +1,12 @@
-import { createAwsAdapter, secretName } from '../aws';
-import {
-  upsertEnvironmentInContent,
-  validateEnvironmentName,
-} from '../environment';
-import {
-  generateLocalEnvContent,
-  parseEnvFile,
-  parseEnvValues,
-} from '../parser';
-import { normalizeProjectSecret } from '../project-secret';
-import type {
-  CommandContext,
-  EnvironmentPayload,
-  EnvValues,
-  EnvVarSchema,
-  SecretPayload,
-} from '../types';
-import { EnvManagerError } from '../types';
+import { formatHeader, upsertSelection } from '../metadata';
+import { generateLocalEnvContent, parseEnvFile, parseEnvValues, schemaValue, type EnvValues, type EnvVarSchema } from '../parser';
+import type { CommandContext } from '../project';
+import { environmentNames, requireEnvironment, requireProject, type EnvironmentPayload, type ProjectSecret } from '../store';
 
 export interface StoredFileEntry {
   name: string;
   path: string;
   content: string | null;
-}
-
-function getStoredFilePath(
-  schemaEntry: EnvVarSchema,
-  values: EnvValues
-): string | null {
-  return values[schemaEntry.name] ?? schemaEntry.defaultValue;
 }
 
 export function collectStoredFiles(
@@ -42,12 +20,9 @@ export function collectStoredFiles(
   for (const schemaEntry of schema) {
     if (schemaEntry.type !== 'file') continue;
 
-    const path = getStoredFilePath(schemaEntry, values);
+    const path = schemaValue(schemaEntry, values);
     const files = storedFiles ?? {};
-    const hasContent = Object.prototype.hasOwnProperty.call(
-      files,
-      schemaEntry.name
-    );
+    const hasContent = Object.hasOwn(files, schemaEntry.name);
 
     if (path === null && !hasContent) {
       continue;
@@ -106,13 +81,8 @@ function formatEnvironmentPrintOutput(
 ): string {
   const parsed = parseEnvFile(schemaContent);
   const values = parseEnvValues(envPayload.values);
-  const localEnvContent = upsertEnvironmentInContent(
-    generateLocalEnvContent(parsed.schema, values, {
-      project: parsed.header?.project ?? project,
-      version: envPayload.outputs?.['.env.local']?.version ?? null,
-    }),
-    environment
-  ).trimEnd();
+  const header = formatHeader('#', parsed.project ?? project, envPayload.outputs?.['.env.local']?.version ?? null);
+  const localEnvContent = upsertSelection(`${header}\n\n${generateLocalEnvContent(parsed.schema, values)}`, environment).trimEnd();
   const fileContent = formatStoredFiles(
     collectStoredFiles(parsed.schema, values, envPayload.files)
   );
@@ -128,14 +98,11 @@ function formatEnvironmentPrintOutput(
 
 export function formatProjectPrintOutput(
   project: string,
-  payload: SecretPayload,
+  secret: ProjectSecret,
   options: { environment?: string } = {}
 ): string {
-  const projectSecret = normalizeProjectSecret(payload);
-  const schema = projectSecret.schema;
-  const environments = options.environment
-    ? [options.environment]
-    : Object.keys(projectSecret.environments).sort();
+  const schema = secret.schema;
+  const environments = options.environment ? [options.environment] : environmentNames(secret);
 
   if (environments.length === 0) {
     return [
@@ -146,21 +113,12 @@ export function formatProjectPrintOutput(
   }
 
   return environments
-    .map((environment) => {
-      validateEnvironmentName(environment);
-      const envPayload = projectSecret.environments[environment];
-      if (!envPayload) {
-        throw new EnvManagerError(
-          `Environment "${environment}" not found for project "${project}"`
-        );
-      }
-      return formatEnvironmentPrintOutput(
-        project,
-        environment,
-        schema,
-        envPayload
-      );
-    })
+    .map((environment) => formatEnvironmentPrintOutput(
+      project,
+      environment,
+      schema,
+      requireEnvironment(secret, project, environment)
+    ))
     .join('\n\n');
 }
 
@@ -168,15 +126,7 @@ export async function printCommand(
   ctx: CommandContext,
   options: { environment?: string } = {}
 ): Promise<void> {
-  const aws = createAwsAdapter();
-  const secret = await aws.getSecret(secretName(ctx.project));
-
-  if (!secret) {
-    throw new EnvManagerError(
-      `Project "${ctx.project}" not found in AWS Secrets Manager`
-    );
-  }
-
+  const secret = await requireProject(ctx.project);
   process.stdout.write(
     `${formatProjectPrintOutput(ctx.project, secret, options)}\n`
   );

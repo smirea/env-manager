@@ -1,7 +1,8 @@
-import { formatHeaderLine, parseEnvFile, parseEnvLine, parseHeader, parseSchemaComment, formatSchemaComment, findInlineCommentIndex } from './parser';
-import { validateEnv } from './validator';
-import { EnvManagerError, type ParsedEnvFile, type EnvVarSchema } from './types';
 import { isAbsolute, normalize } from 'node:path';
+import { configError } from './errors';
+import { formatHeader, parseHeader } from './metadata';
+import { findInlineCommentIndex, formatSchemaComment, parseEnvFile, parseEnvLine, parseSchemaComment, type EnvVarSchema, type ParsedEnvFile } from './parser';
+import { validateValue } from './validator';
 
 export type OutputFormat = 'ts' | 'swift';
 export type Target = {
@@ -22,12 +23,32 @@ export type RootConfig = ParsedEnvFile & {
   metadata: Map<number, string>;
 };
 
-export function configError(file: string, line: number, message: string): never {
-  throw new EnvManagerError(`${file}:${line}: ${message}`);
+export const DEFAULT_READER_PATH = 'src/env.ts';
+
+const SETTINGS = {
+  local: 'local',
+  format: 'format',
+  path: 'path',
+  generate: 'generate',
+  'values.format': 'format',
+  'values.path': 'path',
+  ts: 'generate',
+} as const;
+type SettingField = keyof typeof SETTINGS;
+type SettingKey = (typeof SETTINGS)[SettingField];
+
+export const SETTING_FIELDS = Object.keys(SETTINGS) as SettingField[];
+
+export function isSettingField(field: string): field is SettingField {
+  return Object.hasOwn(SETTINGS, field);
+}
+
+export function settingKey(field: SettingField): SettingKey {
+  return SETTINGS[field];
 }
 
 export function relativeOutput(value: string, file: string, line: number): string {
-  if (!value || isAbsolute(value) || value.includes('\\') || (/[\r\n]/.test(value) || value.includes(String.fromCharCode(0))) || value.split('/').includes('..')) {
+  if (!value || isAbsolute(value) || value.includes('\\') || /[\r\n]/.test(value) || value.includes('\0') || value.split('/').includes('..')) {
     configError(file, line, `Path "${value}" must be relative and stay inside its directory.`);
   }
   const path = normalize(value);
@@ -41,7 +62,7 @@ export function defaultValuesPath(format: OutputFormat): string {
 
 export function parseRootConfig(content: string, file = '.env', strict = false): RootConfig {
   const lines = content.split('\n');
-  const settings = new Map<string, { value: string; line: number }>();
+  const settings = new Map<SettingKey, { field: SettingField; value: string; line: number }>();
   const targets: Target[] = [];
   const metadata = new Map<number, string>();
   const selections: { names: string[]; line: number }[] = [];
@@ -56,7 +77,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
     if (header) {
       if (projectSeen) configError(file, line, 'Duplicate project header.');
       projectSeen = true;
-      metadata.set(line, formatHeaderLine({ project: header.project, version: null }));
+      metadata.set(line, formatHeader('#', header.project, null));
       continue;
     }
     const match = text.match(/^#\s*env-manager\s+([\w.]+)\s*:\s*(.*?)\s*$/);
@@ -77,7 +98,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
       if (format !== 'ts' && format !== 'swift') configError(file, line, `Target "${name}" needs format=ts or format=swift.`);
       if (format === 'swift' && options.has('generate')) configError(file, line, 'generate is only supported for TypeScript targets.');
       const path = relativeOutput(options.get('path') ?? defaultValuesPath(format), file, line);
-      const generate = format === 'ts' ? relativeOutput(options.get('generate') ?? 'src/env.ts', file, line) : undefined;
+      const generate = format === 'ts' ? relativeOutput(options.get('generate') ?? DEFAULT_READER_PATH, file, line) : undefined;
       targets.push({ name, format, path, generate, line });
       metadata.set(line, `# env-manager target: ${name} format=${format}${options.has('path') ? ` path=${path}` : ''}${options.has('generate') ? ` generate=${generate}` : ''}`);
     } else if (field === 'targets') {
@@ -90,23 +111,22 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
     } else if (field === 'env') {
       configError(file, line, 'The env directive belongs in .env.local, not the tracked .env. Run any other env-manager command to move it.');
     } else {
-      if (!['local', 'format', 'path', 'generate', 'values.format', 'values.path', 'ts'].includes(field)) {
-        configError(file, line, `Unknown env-manager field "${field}".`);
-      }
-      const key = ({ 'values.format': 'format', 'values.path': 'path', ts: 'generate' } as Record<string, string>)[field] ?? field;
+      if (!isSettingField(field)) configError(file, line, `Unknown env-manager field "${field}".`);
+      const key = SETTINGS[field];
       if (settings.has(key)) configError(file, line, `Duplicate or conflicting "${key}" setting.`);
-      if (field === 'local' && value !== 'true' && value !== 'false') configError(file, line, 'local must be true or false.');
+      if (key === 'local' && value !== 'true' && value !== 'false') configError(file, line, 'local must be true or false.');
       if (key === 'format' && value !== 'ts' && value !== 'swift') configError(file, line, 'format must be ts or swift.');
       if (key === 'path' || key === 'generate') relativeOutput(value, file, line);
-      settings.set(key, { value, line });
+      settings.set(key, { field, value, line });
       metadata.set(line, `# env-manager ${field}: ${value}`);
     }
   }
   const multi = targets.length > 0;
-  const modern = multi || lines.some(l => /^#\s*env-manager\s+(format|path|generate)\s*:/.test(l.trim()));
-  if (multi && ['format', 'path', 'generate'].some(k => settings.has(k))) configError(file, 1, 'Target declarations cannot be mixed with single-project output settings.');
+  const modern = multi || [...settings.values()].some(s => s.field === 'format' || s.field === 'path' || s.field === 'generate');
+  if (multi && (['format', 'path', 'generate'] as const).some(k => settings.has(k))) configError(file, 1, 'Target declarations cannot be mixed with single-project output settings.');
   if (!multi && selections.length) configError(file, selections[0].line, 'Declare targets before using target selections.');
-  if (settings.get('format')?.value === 'swift' && metadata.get(settings.get('generate')?.line ?? 0)?.startsWith('# env-manager generate:')) configError(file, settings.get('generate')!.line, 'generate is only supported with format: ts.');
+  const generateSetting = settings.get('generate');
+  if (settings.get('format')?.value === 'swift' && generateSetting?.field === 'generate') configError(file, generateSetting.line, 'generate is only supported with format: ts.');
   const selected = new Set<string>();
   for (const selection of selections) {
     if (selection.names[0] === '*') selection.names = targets.map(t => t.name);
@@ -120,7 +140,6 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
   }
   const scopes = new Map<string, string[]>();
   let scope: string[] | undefined;
-  const strictTypes = strict || modern;
   for (const [index, raw] of lines.entries()) {
     const line = index + 1;
     const selection = selections.find(s => s.line === line);
@@ -145,7 +164,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
     }
   }
   const parsed = parseEnvFile(content);
-  if (strictTypes) {
+  if (strict || modern) {
     for (const name of names) {
       if (!parsed.schema.some(s => s.name === name)) {
         const line = lines.findIndex(l => parseEnvLine(l.trimStart())?.name === name) + 1;
@@ -156,16 +175,17 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
   for (const entry of parsed.schema) {
     const min = entry.validators.find(v => v.kind === 'min');
     const max = entry.validators.find(v => v.kind === 'max');
-    if (min?.kind === 'min' && max?.kind === 'max' && min.value > max.value) configError(file, entry.lineNumber, `min() exceeds max() for ${entry.name}.`);
-    if (entry.defaultValue !== null && entry.defaultValue !== '') {
-      const result = validateEnv([entry], {});
-      if (!result.valid) configError(file, entry.lineNumber, `Invalid default for ${entry.name}: ${result.errors[0].message}`);
-    }
+    if (min && max && min.value > max.value) configError(file, entry.lineNumber, `min() exceeds max() for ${entry.name}.`);
+    const error = entry.defaultValue ? validateValue(entry, entry.defaultValue) : null;
+    if (error) configError(file, entry.lineNumber, `Invalid default for ${entry.name}: ${error}`);
   }
+  const setting = (key: SettingKey) => settings.get(key)?.value;
   return {
-    ...parsed, local: settings.has('local') ? settings.get('local')!.value === 'true' : undefined,
-    format: settings.get('format')?.value as OutputFormat | undefined,
-    path: settings.get('path')?.value, generate: settings.get('generate')?.value,
+    ...parsed,
+    local: settings.has('local') ? setting('local') === 'true' : undefined,
+    format: setting('format') as OutputFormat | undefined,
+    path: setting('path'),
+    generate: setting('generate'),
     targets, scopes, modern, metadata,
   };
 }
@@ -174,8 +194,8 @@ export function schemaForTarget(config: RootConfig, name: string): EnvVarSchema[
   return config.schema.filter(s => config.scopes.get(s.name)?.includes(name));
 }
 
-export function upsertSetting(content: string, field: string, value: string): string {
-  const aliases = field === 'format' ? ['format', 'values.format'] : field === 'path' ? ['path', 'values.path'] : field === 'generate' ? ['generate', 'ts'] : [field];
+export function upsertSetting(content: string, field: SettingField, value: string): string {
+  const aliases = SETTING_FIELDS.filter(alias => SETTINGS[alias] === SETTINGS[field]);
   const lines = content.split('\n');
   const existing = lines.findIndex(l => aliases.some(a => new RegExp(`^#\\s*env-manager\\s+${a.replace('.', '\\.')}\\s*:`).test(l)));
   const comment = `# env-manager ${field}: ${value}`;
@@ -194,8 +214,7 @@ export function formatRootConfig(content: string, file: string): string {
     const text = raw.trimStart();
     const variable = parseEnvLine(text);
     if (variable) {
-      const equals = text.indexOf('=');
-      const rest = text.slice(equals + 1);
+      const rest = text.slice(text.indexOf('=') + 1);
       const commentIndex = findInlineCommentIndex(rest);
       const value = (commentIndex === -1 ? rest : rest.slice(0, commentIndex)).trim();
       const comment = variable.inlineComment;

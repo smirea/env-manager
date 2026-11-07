@@ -5,14 +5,14 @@ import {
   parseEnvFile,
   parseEnvValues,
   parseFormatRegex,
-  parseHeader,
   parseSchemaComment,
   parseValidators,
   serializeEnvValues,
-  setHeaderVersion,
-  upsertHeaderVersion,
+  type Validator,
 } from "./parser";
-import type { FormatValidator } from "./types";
+import { ensureHeader, parseHeader, setHeaderVersion } from "./metadata";
+
+type FormatValidator = Extract<Validator, { kind: "format" }>;
 
 describe("parseHeader", () => {
   test("parses valid header", () => {
@@ -202,10 +202,7 @@ PORT=3000 # {int:min(3000),max(10000)}
 `;
     const result = parseEnvFile(content);
 
-    expect(result.header).toEqual({
-      project: "test-project",
-      version: 3,
-    });
+    expect(result.project).toBe("test-project");
 
     expect(result.schema.map((s) => s.name)).toEqual(["FOO", "BAR", "PORT"]);
     expect(result.schema).toHaveLength(3);
@@ -244,7 +241,7 @@ PORT=3000 # {int:min(3000),max(10000)}
 FOO=bar # {string}
 `;
     const result = parseEnvFile(content);
-    expect(result.header?.project).toBe("test-project");
+    expect(result.project).toBe("test-project");
     expect(result.schema[0].name).toBe("FOO");
   });
 
@@ -283,7 +280,7 @@ BAR="double quoted" # {string}
 
   test("handles empty file", () => {
     const result = parseEnvFile("");
-    expect(result.header).toBeNull();
+    expect(result.project).toBeNull();
     expect(result.schema).toEqual([]);
   });
 
@@ -382,7 +379,7 @@ FOO=bar
   });
 
   test("adds a header when one is missing", () => {
-    expect(upsertHeaderVersion("FOO=bar\n", "demo", 1)).toBe(`# env-manager: demo | v1
+    expect(ensureHeader("FOO=bar\n", "demo")).toBe(`# env-manager: demo
 
 FOO=bar
 `);
@@ -467,28 +464,6 @@ EXTRA='yes'
       NAME: "C:\\O'Reilly",
       EXTRA: "yes",
     });
-  });
-
-  test("can include a value sync header", () => {
-    const content = generateLocalEnvContent(
-      [
-        {
-          name: "API_KEY",
-          type: "string",
-          optional: false,
-          validators: [],
-          defaultValue: null,
-          lineNumber: 1,
-        },
-      ],
-      { API_KEY: "sk-test" },
-      { project: "demo", version: 5 }
-    );
-
-    expect(content).toBe(`# env-manager: demo | v5
-
-API_KEY='sk-test' # {string}
-`);
   });
 });
 

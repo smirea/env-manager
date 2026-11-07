@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { withGitUpdates, writeManagedFile } from './git-updates';
+import { withGitUpdates, writeManagedFile } from './files';
 
 function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-C', dir, ...args], { env: process.env });

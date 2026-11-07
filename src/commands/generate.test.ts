@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generateCommand, syncOutputs } from './generate';
+import { generateCommand } from './generate';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
@@ -161,16 +161,15 @@ describe('generate command', () => {
     await withTempDir(async (dir) => {
       await mkdir(path.join(dir, 'generated'), { recursive: true });
 
-      await syncOutputs(
-        { project: 'test-project', cwd: dir },
-        [
-          '# env-manager: test-project | 2025-01-01T00:00:00Z',
-          '# env-manager ts: generated/env.ts',
-          '',
-          'FOO=3000 # {int}',
-          '',
-        ].join('\n')
-      );
+      await writeFile(path.join(dir, '.env'), [
+        '# env-manager: test-project | 2025-01-01T00:00:00Z',
+        '# env-manager ts: generated/env.ts',
+        '',
+        'FOO=3000 # {int}',
+        '',
+      ].join('\n'));
+      await writeFile(path.join(dir, 'package.json'), '{}\n');
+      await generateCommand({ project: 'test-project', cwd: dir });
 
       const output = await readFile(
         path.join(dir, 'generated/env.ts'),

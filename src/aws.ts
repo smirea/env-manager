@@ -7,24 +7,26 @@ import {
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
-import type { SecretPayload } from './types';
-import { AwsError } from './types';
+import { EnvManagerError } from './errors';
 
-export interface AwsAdapter {
-  getSecret(name: string): Promise<SecretPayload | null>;
-  putSecret(name: string, payload: SecretPayload): Promise<void>;
-  deleteSecret(name: string): Promise<boolean>;
-  listSecrets(prefix: string): Promise<string[]>;
-}
-
-export function secretName(project: string): string {
-  return `env-manager/${project}`;
+export interface SecretPayload {
+  schema: string;
+  environments?: Record<string, {
+    values: string;
+    syncDate: string;
+    files?: Record<string, string>;
+    outputs?: Record<string, { version: number; hash: string; date?: string }>;
+  }>;
+  values?: string;
+  syncDate?: string;
+  files?: Record<string, string>;
+  locations?: Record<string, string>;
 }
 
 function getAwsRegion(): string {
   const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
   if (!region) {
-    throw new AwsError(
+    throw new EnvManagerError(
       'AWS region not configured. Set AWS_REGION or AWS_DEFAULT_REGION.'
     );
   }
@@ -43,7 +45,7 @@ function getStaticCredentials():
   const sessionToken = process.env.AWS_SESSION_TOKEN;
 
   if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
-    throw new AwsError(
+    throw new EnvManagerError(
       'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must both be set.'
     );
   }
@@ -72,17 +74,11 @@ function isResourceNotFound(err: unknown): boolean {
   );
 }
 
-class AwsSdkAdapter implements AwsAdapter {
-  private readonly secrets: SecretsManagerClient;
-
-  constructor() {
-    const region = getAwsRegion();
-    const credentials = getStaticCredentials();
-    this.secrets = new SecretsManagerClient({
-      region,
-      credentials: credentials ?? undefined,
-    });
-  }
+class AwsSdkAdapter {
+  private readonly secrets = new SecretsManagerClient({
+    region: getAwsRegion(),
+    credentials: getStaticCredentials() ?? undefined,
+  });
 
   async getSecret(name: string): Promise<SecretPayload | null> {
     try {
@@ -90,16 +86,16 @@ class AwsSdkAdapter implements AwsAdapter {
         new GetSecretValueCommand({ SecretId: name })
       );
       if (!result.SecretString) {
-        throw new AwsError('Secret is missing SecretString payload.');
+        throw new EnvManagerError('Secret is missing SecretString payload.');
       }
       try {
         return JSON.parse(result.SecretString) as SecretPayload;
       } catch {
-        throw new AwsError(`Secret ${name} is not valid JSON.`);
+        throw new EnvManagerError(`Secret ${name} is not valid JSON.`);
       }
     } catch (error) {
       if (isResourceNotFound(error)) return null;
-      throw new AwsError(`Failed to get secret: ${formatAwsError(error)}`);
+      throw new EnvManagerError(`Failed to get secret: ${formatAwsError(error)}`);
     }
   }
 
@@ -113,7 +109,7 @@ class AwsSdkAdapter implements AwsAdapter {
         await this.secrets.send(new CreateSecretCommand({ Name: name, SecretString: json }));
       }
     } catch (error) {
-      throw new AwsError(`Failed to save secret: ${formatAwsError(error)}`);
+      throw new EnvManagerError(`Failed to save secret: ${formatAwsError(error)}`);
     }
   }
 
@@ -128,7 +124,7 @@ class AwsSdkAdapter implements AwsAdapter {
       return true;
     } catch (error) {
       if (isResourceNotFound(error)) return false;
-      throw new AwsError(`Failed to delete secret: ${formatAwsError(error)}`);
+      throw new EnvManagerError(`Failed to delete secret: ${formatAwsError(error)}`);
     }
   }
 
@@ -154,14 +150,14 @@ class AwsSdkAdapter implements AwsAdapter {
         nextToken = result.NextToken;
       } while (nextToken);
     } catch (error) {
-      throw new AwsError(`Failed to list secrets: ${formatAwsError(error)}`);
+      throw new EnvManagerError(`Failed to list secrets: ${formatAwsError(error)}`);
     }
 
     return names;
   }
 }
 
-export function createAwsAdapter(): AwsAdapter {
+export function createAwsAdapter() {
   return new AwsSdkAdapter();
 }
 
@@ -172,7 +168,7 @@ export async function checkAwsCredentials(): Promise<void> {
   try {
     await sts.send(new GetCallerIdentityCommand({}));
   } catch (error) {
-    throw new AwsError(
+    throw new EnvManagerError(
       `AWS credentials not configured. ${formatAwsError(error)}`
     );
   }

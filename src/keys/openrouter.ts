@@ -1,5 +1,6 @@
-import { EnvManagerError } from "../types";
-import type { KeyDefinition, KeyResolveOptions } from "./index";
+import { EnvManagerError } from "../errors";
+import { ask } from "../prompt";
+import type { KeyDefinition, KeyOptions } from "./index";
 
 type OpenRouterCreateKeyResponse = {
   key?: unknown;
@@ -15,7 +16,7 @@ type OpenRouterCreateKeyResponse = {
 const OPENROUTER_CREATE_KEY_URL = "https://openrouter.ai/api/v1/keys";
 const ISO_8601_UTC_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
-export const OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD = 10;
+const DEFAULT_MONTHLY_LIMIT_USD = 10;
 
 export function isValidOpenRouterApiKey(key: string): boolean {
   return /^sk-or-v1-[a-zA-Z0-9-_]+$/.test(key);
@@ -53,7 +54,7 @@ type NormalizedOpenRouterOptions = {
 
 export function normalizeOpenRouterOptions(
   projectName: string,
-  options?: KeyResolveOptions
+  options?: KeyOptions
 ): NormalizedOpenRouterOptions {
   const normalizedName = options?.name?.trim() || projectName;
 
@@ -67,7 +68,7 @@ export function normalizeOpenRouterOptions(
     );
   }
 
-  let limit: number | null = OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD;
+  let limit: number | null = DEFAULT_MONTHLY_LIMIT_USD;
   if (options?.unlimited === true) {
     limit = null;
   } else if (options?.credit !== undefined) {
@@ -97,21 +98,40 @@ export function normalizeOpenRouterOptions(
   };
 }
 
+async function promptCreditLimit(assumeYes: boolean): Promise<Pick<KeyOptions, "credit" | "unlimited">> {
+  if (assumeYes) return { credit: DEFAULT_MONTHLY_LIMIT_USD };
+  return ask(
+    `OpenRouter monthly credit limit in USD (default ${DEFAULT_MONTHLY_LIMIT_USD}; type "unlimited" for no limit): `,
+    answer => {
+      const input = answer.toLowerCase();
+      if (input === "") return { credit: DEFAULT_MONTHLY_LIMIT_USD };
+      if (input === "unlimited") return { unlimited: true };
+      const limit = Number(input);
+      return Number.isFinite(limit) && limit >= 0 ? { credit: limit } : undefined;
+    },
+    'Invalid value. Enter a non-negative number or "unlimited": ',
+    `Re-run with --yes to use the default OpenRouter limit (${DEFAULT_MONTHLY_LIMIT_USD} USD/month), or pass --credit/--unlimited.`
+  );
+}
+
 export const openRouterKey: KeyDefinition = {
   envName: "OPENROUTER_API_KEY",
   description: "OpenRouter API key for model routing",
   schemaType: "string:format(/^sk-or-v1-/)",
+  acceptsOptions: true,
 
   validate(key: string): boolean {
     return isValidOpenRouterApiKey(key);
   },
 
-  async resolve(
-    projectName: string,
-    options?: KeyResolveOptions
-  ): Promise<string> {
-    const { default: env } = await import('../env');
-    const normalized = normalizeOpenRouterOptions(projectName, options);
+  async resolve(projectName: string, options: KeyOptions, assumeYes: boolean): Promise<string> {
+    normalizeOpenRouterOptions(projectName, options);
+    const limit = options.credit === undefined && options.unlimited !== true
+      ? await promptCreditLimit(assumeYes)
+      : {};
+    const normalized = normalizeOpenRouterOptions(projectName, { ...options, ...limit });
+    // env.ts validates every variable on import; only this key needs the management key.
+    const { default: env } = await import("../env");
     const response = await fetch(OPENROUTER_CREATE_KEY_URL, {
       method: "POST",
       headers: {

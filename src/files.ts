@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { realpathSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import { EnvManagerError } from './types';
+import { EnvManagerError } from './errors';
 
 type GitUpdates = {
   root: string;
@@ -14,17 +15,20 @@ const updates = new AsyncLocalStorage<GitUpdates>();
 function git(cwd: string, args: string[]): string {
   const result = Bun.spawnSync(['git', '--literal-pathspecs', '-C', cwd, ...args], { env: process.env });
   if (result.exitCode !== 0) {
-    throw new EnvManagerError(
-      `Git update failed: ${result.stderr.toString().trim()}`
-    );
+    throw new EnvManagerError(`Git update failed: ${result.stderr.toString().trim()}`);
   }
   return result.stdout.toString();
 }
 
-function snapshot(cwd: string): GitUpdates | undefined {
+export function gitRoot(cwd: string): string | null {
   const result = Bun.spawnSync(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { env: process.env });
-  if (result.exitCode !== 0) return;
-  const root = result.stdout.toString().trimEnd();
+  if (result.exitCode !== 0) return null;
+  return realpathSync(result.stdout.toString().trimEnd());
+}
+
+function snapshot(cwd: string): GitUpdates | undefined {
+  const root = gitRoot(cwd);
+  if (!root) return;
   const states: GitUpdates['states'] = new Map();
   for (const entry of git(root, ['ls-files', '--stage', '-z']).split('\0')) {
     const tab = entry.indexOf('\t');
@@ -34,9 +38,7 @@ function snapshot(cwd: string): GitUpdates | undefined {
       states.set(entry.slice(tab + 1), 'clean');
     }
   }
-  const entries = git(root, [
-    'status', '--porcelain=v1', '--untracked-files=no', '-z',
-  ]).split('\0');
+  const entries = git(root, ['status', '--porcelain=v1', '--untracked-files=no', '-z']).split('\0');
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     if (!entry) continue;
@@ -54,18 +56,20 @@ function snapshot(cwd: string): GitUpdates | undefined {
   return { root, states, originals: new Map() };
 }
 
-async function readExisting(path: string): Promise<Buffer | null> {
+async function readBytes(path: string): Promise<Buffer | null> {
   const file = Bun.file(path);
   return await file.exists() ? Buffer.from(await file.arrayBuffer()) : null;
 }
 
+export async function readText(path: string): Promise<string | null> {
+  const file = Bun.file(path);
+  return await file.exists() ? file.text() : null;
+}
+
 export async function writeManagedFile(path: string, content: string): Promise<boolean> {
   const session = updates.getStore();
-  const absolutePath = resolve(
-    await realpath(dirname(path)).catch(() => dirname(path)),
-    basename(path)
-  );
-  const existing = await readExisting(absolutePath);
+  const absolutePath = resolve(await realpath(dirname(path)).catch(() => dirname(path)), basename(path));
+  const existing = await readBytes(absolutePath);
   if (existing?.equals(Buffer.from(content))) return false;
   if (session && !session.originals.has(absolutePath)) {
     session.originals.set(absolutePath, existing);
@@ -85,8 +89,7 @@ export async function withGitUpdates<T>(cwd: string, operation: () => Promise<T>
       const absolutePath = resolve(session.root, path);
       if (!session.originals.has(absolutePath)) continue;
       const original = session.originals.get(absolutePath);
-      const file = Bun.file(absolutePath);
-      const current = await file.exists() ? Buffer.from(await file.arrayBuffer()) : null;
+      const current = await readBytes(absolutePath);
       if (original === null ? current === null : current && original?.equals(current)) continue;
       (state === 'clean' ? clean : staged).push(path);
     }

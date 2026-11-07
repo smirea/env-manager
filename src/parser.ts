@@ -1,35 +1,41 @@
-import type {
-  EnvFileHeader,
-  EnvVarSchema,
-  EnvValues,
-  ParsedEnvFile,
-  SchemaType,
-  Validator,
-} from "./types";
-import { ParseError, SCHEMA_TYPES } from "./types";
+import { EnvManagerError } from "./errors";
+import { parseHeader } from "./metadata";
+
+export const SCHEMA_TYPES = ["string", "int", "float", "bool", "url", "email", "file"] as const;
+export type SchemaType = (typeof SCHEMA_TYPES)[number];
+
+export type Validator =
+  | { kind: "min"; value: number }
+  | { kind: "max"; value: number }
+  | { kind: "format"; pattern: RegExp };
+
+export interface EnvVarSchema {
+  name: string;
+  type: SchemaType;
+  optional: boolean;
+  validators: Validator[];
+  defaultValue: string | null;
+  lineNumber: number;
+}
+
+export interface ParsedEnvFile {
+  project: string | null;
+  schema: EnvVarSchema[];
+}
+
+export type EnvValues = Record<string, string>;
 
 export const NUMERIC_VALUE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 const SCHEMA_TYPE_PATTERN = new RegExp(`^(optional\\s+)?(${SCHEMA_TYPES.join("|")})(?::(.+))?$`);
 
-export function formatHeaderLine(header: EnvFileHeader): string {
-  return `# env-manager: ${header.project}${header.version === null ? "" : ` | v${header.version}`}`;
-}
-
-// Anything after "|" that is not a version is a legacy sync date and is dropped.
-export function parseHeader(line: string): EnvFileHeader | null {
-  const match = line.match(/^#\s*env-manager:\s*([^\s|]+)(?:\s*\|\s*(.+))?\s*$/);
-  if (!match) return null;
-  const version = match[2]?.trim().match(/^v(\d+)$/)?.[1];
-  return {
-    project: match[1].trim(),
-    version: version === undefined ? null : Number(version),
-  };
-}
-
 export function parseFormatRegex(formatStr: string): RegExp {
   const match = formatStr.match(/^\/(.+)\/([gimsuy]*)$/);
-  if (!match) throw new Error(`Invalid regex format: ${formatStr}`);
-  return new RegExp(match[1], match[2]);
+  if (!match) throw new EnvManagerError(`Invalid regex format: ${formatStr}`);
+  try {
+    return new RegExp(match[1], match[2]);
+  } catch (error) {
+    throw new EnvManagerError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 export function parseValidators(
@@ -42,12 +48,12 @@ export function parseValidators(
   let remaining = validatorStr.trim();
   while (remaining) {
     const start = remaining.match(/^(min|max|format)\(/);
-    if (!start) throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    if (!start) throw new EnvManagerError(`Invalid validator syntax: ${validatorStr}`);
     const kind = start[1];
     const offset = start[0].length;
     let end = offset;
     if (kind === "format") {
-      if (remaining[offset] !== '/') throw new ParseError(`Invalid regex format: ${remaining}`);
+      if (remaining[offset] !== '/') throw new EnvManagerError(`Invalid regex format: ${remaining}`);
       let escaped = false;
       let characterClass = false;
       let closed = false;
@@ -59,40 +65,34 @@ export function parseValidators(
         if (char === ']') characterClass = false;
         if (char === '/' && !characterClass) { closed = true; break; }
       }
-      if (!closed) throw new ParseError(`Invalid regex format: ${remaining}`);
+      if (!closed) throw new EnvManagerError(`Invalid regex format: ${remaining}`);
       end++;
       while (/[a-z]/i.test(remaining[end] ?? '') && end < remaining.length) end++;
     } else {
       end = remaining.indexOf(')', offset);
     }
-    if (end < offset || remaining[end] !== ')') throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+    if (end < offset || remaining[end] !== ')') throw new EnvManagerError(`Invalid validator syntax: ${validatorStr}`);
     const value = remaining.slice(offset, end);
     if (kind === "min" || kind === "max") {
       if (type !== "int" && type !== "float") {
-        throw new ParseError(`${kind}() is not valid for type ${type}`);
+        throw new EnvManagerError(`${kind}() is not valid for type ${type}`);
       }
       const parsed = Number(value);
       if (!NUMERIC_VALUE_PATTERN.test(value.trim()) || !Number.isFinite(parsed)) {
-        throw new ParseError(`Invalid ${kind}() value: ${value}`);
+        throw new EnvManagerError(`Invalid ${kind}() value: ${value}`);
       }
       validators.push({ kind, value: parsed });
     } else if (kind === "format") {
       if (type !== "string") {
-        throw new ParseError(`format() is not valid for type ${type}`);
+        throw new EnvManagerError(`format() is not valid for type ${type}`);
       }
-      try {
-        validators.push({ kind: "format", pattern: parseFormatRegex(value) });
-      } catch (error) {
-        throw new ParseError(
-          error instanceof Error ? error.message : String(error)
-        );
-      }
+      validators.push({ kind: "format", pattern: parseFormatRegex(value) });
     }
     remaining = remaining.slice(end + 1).trim();
     if (remaining) {
-      if (!remaining.startsWith(',')) throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+      if (!remaining.startsWith(',')) throw new EnvManagerError(`Invalid validator syntax: ${validatorStr}`);
       remaining = remaining.slice(1).trim();
-      if (!remaining) throw new ParseError(`Invalid validator syntax: ${validatorStr}`);
+      if (!remaining) throw new EnvManagerError(`Invalid validator syntax: ${validatorStr}`);
     }
   }
 
@@ -212,8 +212,6 @@ export function parseEnvLine(line: string): {
 export function parseEnvFile(content: string): ParsedEnvFile {
   const lines = content.split("\n");
   const schema: EnvVarSchema[] = [];
-  let header: EnvFileHeader | null = null;
-  let headerSearchActive = true;
   let pendingSchema: {
     type: SchemaType;
     optional: boolean;
@@ -223,25 +221,6 @@ export function parseEnvFile(content: string): ParsedEnvFile {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trimStart();
     const lineNumber = i + 1;
-
-    if (headerSearchActive && !header) {
-      const h = parseHeader(line);
-      if (h) {
-        header = h;
-        continue;
-      }
-      const trimmed = line.trim();
-      if (trimmed === "") {
-        continue;
-      }
-      if (trimmed.startsWith("#")) {
-        const schemaComment = parseSchemaComment(line);
-        if (!schemaComment) {
-          continue;
-        }
-      }
-      headerSearchActive = false;
-    }
 
     const envLine = parseEnvLine(line);
     if (envLine) {
@@ -280,7 +259,15 @@ export function parseEnvFile(content: string): ParsedEnvFile {
     }
   }
 
-  return { header, schema, rawContent: content };
+  return { project: findProject(content), schema };
+}
+
+function findProject(content: string): string | null {
+  for (const line of content.split("\n")) {
+    const header = parseHeader(line);
+    if (header) return header.project;
+  }
+  return null;
 }
 
 export function parseEnvValues(content: string): EnvValues {
@@ -292,22 +279,12 @@ export function parseEnvValues(content: string): EnvValues {
   return values;
 }
 
-export function generateEnvContent(
-  header: EnvFileHeader,
-  schema: EnvVarSchema[],
-  values: EnvValues
-): string {
-  const lines: string[] = [];
-  lines.push(formatHeaderLine(header));
-  lines.push("");
+export function schemaValue(entry: EnvVarSchema, values: EnvValues): string | null {
+  return values[entry.name] ?? entry.defaultValue;
+}
 
-  for (const s of schema) {
-    const schemaStr = formatSchemaComment(s);
-    const value = values[s.name] ?? s.defaultValue ?? "";
-    lines.push(`${s.name}=${value} ${schemaStr}`);
-  }
-
-  return lines.join("\n") + "\n";
+export function selectValues(schema: EnvVarSchema[], values: EnvValues): EnvValues {
+  return Object.fromEntries(schema.map(entry => [entry.name, schemaValue(entry, values) ?? ""]));
 }
 
 function escapeSingleQuotedValue(value: string): string {
@@ -323,10 +300,9 @@ function formatLocalValue(value: string): string {
 
 export function generateLocalEnvContent(
   schema: EnvVarSchema[],
-  values: EnvValues,
-  header?: EnvFileHeader
+  values: EnvValues
 ): string {
-  const lines: string[] = header ? [formatHeaderLine(header), ""] : [];
+  const lines: string[] = [];
   const schemaNames = new Set(schema.map((entry) => entry.name));
   for (const entry of schema) {
     if (Object.hasOwn(values, entry.name)) {
@@ -355,42 +331,6 @@ export function formatSchemaComment(s: EnvVarSchema): string {
   }
 
   return `# {${inner}}`;
-}
-
-export function setHeaderVersion(content: string, version: number | null): string {
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const header = parseHeader(line);
-    if (header) {
-      lines[i] = formatHeaderLine({ project: header.project, version });
-      break;
-    }
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    if (trimmed.startsWith("#")) {
-      const schemaComment = parseSchemaComment(line);
-      if (!schemaComment) continue;
-    }
-    break;
-  }
-  return lines.join("\n");
-}
-
-export function upsertHeaderVersion(
-  content: string,
-  project: string,
-  version: number | null
-): string {
-  if (parseEnvFile(content).header) {
-    return setHeaderVersion(content, version);
-  }
-
-  const header = formatHeaderLine({ project, version });
-  if (content.trim() === "") {
-    return `${header}\n\n`;
-  }
-  return `${header}\n\n${content}`;
 }
 
 export function serializeEnvValues(values: EnvValues): string {

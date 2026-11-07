@@ -1,92 +1,64 @@
 #!/usr/bin/env bun
 
-import { readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { parseRootConfig, formatRootConfig } from './config';
-import { isManagedEnvFile, locateProject, type ProjectLocation } from './project-root';
-import { findEnvironmentInContent, moveEnvironmentToValuesFile, removeEnvironmentFromContent } from './environment';
-import { withGitUpdates, writeManagedFile } from './git-updates';
-import yargs, { type Argv, type CommandModule } from 'yargs';
+import yargs, { type Argv, type ArgumentsCamelCase, type CommandModule } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { checkAwsCredentials } from './aws';
+import { formatRootConfig, parseRootConfig } from './config';
+import { EnvManagerError, NotInitializedError } from './errors';
+import { readText, withGitUpdates, writeManagedFile } from './files';
+import { hasMetadata, removeSelection } from './metadata';
+import { SCHEMA_TYPES } from './parser';
+import { loadProject, moveSelectionOutOfSchema, readEnvFile, type CommandContext } from './project';
+import { locateProject, resolveProjectName, validateProjectName, type ProjectLocation } from './project-root';
+import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
 import { downCommand } from './commands/down';
-import {
-  envListCommand,
-  envRmCommand,
-  envSetCommand,
-} from './commands/env';
-import {
-  globalGetCommand,
-  globalListCommand,
-  globalRmCommand,
-  globalSetCommand,
-} from './commands/global';
+import { envListCommand, envRmCommand, envSetCommand } from './commands/env';
+import { generateCommand, generateFromEnvironment } from './commands/generate';
+import { globalGetCommand, globalListCommand, globalRmCommand, globalSetCommand } from './commands/global';
+import { infoCommand } from './commands/info';
 import { initCommand } from './commands/init';
 import { listCommand } from './commands/list';
 import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
 import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
-import { generateCommand, generateFromEnvironment, planGeneration } from './commands/generate';
 import { upCommand } from './commands/up';
-import { infoCommand } from './commands/info';
-import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
-import { resolveProjectName } from './project-name';
-import type { CommandContext } from './types';
-import { EnvManagerError, NotInitializedError, SCHEMA_TYPES } from './types';
 
-const RESERVED_PROJECT_NAMES = ['default', 'global'];
-const PROJECT_NAME_PATTERN = /^[^\s|]+$/;
-const SUPPORTED_SCHEMA_VALIDATORS = ['min(n)', 'max(n)', 'format(/regex/)'];
 const HELP_FOOTER = `Supported schema formats:
-  Types: ${SCHEMA_TYPES.join(", ")}
-  Validators: ${SUPPORTED_SCHEMA_VALIDATORS.join(", ")}
+  Types: ${SCHEMA_TYPES.join(', ')}
+  Validators: min(n), max(n), format(/regex/)
   Optional: prefix any type with "optional"
   Example: # {optional string:format(/^sk-/)}`;
-
-interface ProjectArgs {
-  project?: string;
-  local?: boolean;
-}
-
-function withLocalOption<T>(yargs: Argv<T>): Argv<T & { local: boolean | undefined }> {
-  return yargs.option("local", {
-    type: "boolean",
-    description: "Use local files only; --no-local overrides the .env setting",
-  });
-}
 
 // What a command needs when no env-manager .env is found:
 // project: a local setup; named: a project name from --project; clone: a cwd
 // without a foreign .env to overwrite; init: creates one; none: nothing.
-type ProjectRequirement = 'project' | 'named' | 'clone' | 'init' | 'none';
+type ProjectNeed = 'project' | 'named' | 'clone' | 'init' | 'none';
 
-const PROJECT_REQUIREMENTS: Record<string, ProjectRequirement> = {
-  check: 'project',
-  info: 'project',
-  format: 'project',
-  up: 'project',
-  generate: 'project',
-  gen: 'project',
-  ts: 'project',
-  set: 'project',
-  'env set': 'project',
-  'new-key': 'project',
-  print: 'named',
-  rm: 'named',
-  'env list': 'named',
-  'env ls': 'named',
-  'env rm': 'named',
-  down: 'clone',
-  init: 'init',
-  list: 'none',
-  ls: 'none',
-  'global set': 'none',
-  'global get': 'none',
-  'global list': 'none',
-  'global ls': 'none',
-  'global rm': 'none',
-};
+interface Needs {
+  project: ProjectNeed;
+  storage: 'required' | 'unless-local' | 'none';
+  readOnly?: boolean;
+  local?: boolean;
+}
+
+type Args = ArgumentsCamelCase<Record<string, any>> & { local: boolean };
+
+interface Command {
+  command: string;
+  describe: string;
+  aliases?: string[];
+  builder?: (yargs: Argv) => Argv;
+  needs: Needs | ((argv: Args) => Needs);
+  run: (argv: Args, ctx: CommandContext) => Promise<void>;
+}
+
+interface Group {
+  command: string;
+  describe: string;
+  commands: Command[];
+}
 
 type NoProject = Extract<ProjectLocation, { kind: 'none' }>;
 
@@ -96,14 +68,14 @@ function describeSearch(location: NoProject): string {
   return `${location.start} or its parents up to the repository root ${location.repoRoot}`;
 }
 
-function missingProjectError(location: NoProject, requirement: ProjectRequirement): NotInitializedError {
+function missingProjectError(location: NoProject, need: ProjectNeed): NotInitializedError {
   const lines = [`No env-manager setup found in ${describeSearch(location)}.`];
   for (const file of location.ignored) {
     lines.push(`${file} has no "# env-manager: <project>" header, so it is not an env-manager file.`);
   }
   const ownEnv = join(location.start, '.env');
-  if (requirement === 'clone') lines.push(`down would overwrite ${ownEnv}. Move it away, or run env-manager init to adopt it.`);
-  else if (requirement === 'named') lines.push('Pass --project <name>, or run env-manager init.');
+  if (need === 'clone') lines.push(`down would overwrite ${ownEnv}. Move it away, or run env-manager init to adopt it.`);
+  else if (need === 'named') lines.push('Pass --project <name>, or run env-manager init.');
   else if (location.ignored.includes(ownEnv)) lines.push('If it belongs to this project, run env-manager init to adopt it.');
   else if (location.ignored.length) lines.push(`Run env-manager init in ${dirname(location.ignored.at(-1)!)} to adopt its .env, or here to start a separate project.`);
   else lines.push('Run env-manager init.');
@@ -125,755 +97,308 @@ function checkInitLocation(location: ProjectLocation): void {
   }
 }
 
-function enterProject(commandName: string, argv: { project?: string; list?: boolean }): void {
-  const requirement = commandName === 'new-key' && argv.list ? 'none' : PROJECT_REQUIREMENTS[commandName];
-  if (!requirement) throw new Error(`No project requirement declared for command "${commandName}".`);
+function enterProject(need: ProjectNeed, project: string | undefined): void {
   const location = locateProject(process.cwd());
-  if (requirement === 'init') return checkInitLocation(location);
+  if (need === 'init') return checkInitLocation(location);
   if (location.kind === 'managed') {
     for (const file of location.ignored) console.warn(`Warning: ignoring ${file}: it has no env-manager metadata.`);
     process.chdir(location.root);
     return;
   }
-  if (requirement === 'none') return;
-  if (requirement === 'named' && argv.project !== undefined) return;
-  if (requirement === 'clone' && !location.ignored.includes(join(location.start, '.env'))) return;
-  throw missingProjectError(location, requirement);
+  if (need === 'none') return;
+  if (need === 'named' && project !== undefined) return;
+  if (need === 'clone' && !location.ignored.includes(join(location.start, '.env'))) return;
+  throw missingProjectError(location, need);
 }
 
-function withCommandContext(command: CommandModule<any, any>): CommandModule<any, any> {
+function toModule(spec: Command, prefix: string): CommandModule<any, any> {
   return {
-    ...command,
-    handler: async (argv) => {
-      const commandName = argv._.map(String).join(' ');
-      enterProject(commandName, argv as ProjectArgs & { list?: boolean });
+    command: spec.command,
+    describe: spec.describe,
+    aliases: spec.aliases,
+    builder: (y: Argv) => {
+      const withBuilder = spec.builder ? spec.builder(y) : y;
+      const projectScoped = typeof spec.needs === 'function' || spec.needs.project !== 'none';
+      return projectScoped && !spec.command.includes('[project]')
+        ? withBuilder.option('project', { alias: 'p', type: 'string', description: 'Project name (default: .env header, then directory name)' })
+        : withBuilder;
+    },
+    handler: async (raw: ArgumentsCamelCase<Record<string, any>>) => {
+      const argv = raw as Args;
+      const name = `${prefix}${spec.command.split(' ')[0]}`;
+      const needs = typeof spec.needs === 'function' ? spec.needs(argv) : spec.needs;
+      enterProject(needs.project, argv.project);
       const envPath = join(process.cwd(), '.env');
-      const existing = await readFile(envPath, 'utf8').catch((error) => {
-        if (error.code === 'ENOENT') return undefined;
-        throw error;
-      });
-      const original = existing !== undefined && isManagedEnvFile(existing) ? existing : undefined;
-      const readOnly = commandName === 'check' || commandName === 'info';
-      const misplacedEnvironment = original !== undefined && !readOnly ? findEnvironmentInContent(original) : null;
-      const content = misplacedEnvironment ? removeEnvironmentFromContent(original!) : original;
-      const config = content !== undefined ? parseRootConfig(content, envPath, argv.strict === true) : undefined;
-      const enablingLocal = commandName === 'set' && argv.field === 'local' && argv.value === 'true';
-      const local = argv.local ?? (enablingLocal || config?.local === true);
-      const localCommands = ['init', 'generate', 'gen', 'ts', 'set', 'env set', 'check', 'format', 'info'];
-      const catalog = commandName === 'new-key' && argv.list;
-      if (local && !localCommands.includes(commandName) && !catalog && commandName !== 'env') {
-        throw new EnvManagerError(`${commandName} requires secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.`);
+      const existing = await readText(envPath);
+      const content = existing !== null && hasMetadata(existing) ? existing : null;
+      const config = content === null ? null : parseRootConfig(removeSelection(content), envPath);
+      const local: boolean = argv.local ?? needs.local ?? config?.local === true;
+      if (local && needs.storage === 'required') {
+        throw new EnvManagerError(`${name} requires secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.`);
       }
-      if (content !== undefined && ['check', 'format', 'up', 'down', 'new-key', 'env set'].includes(commandName) && !catalog) {
-        await planGeneration(createContext(resolveProject(argv.project)), content);
-      }
+      const ctx: CommandContext = { project: resolveProjectName(process.cwd(), argv.project), cwd: process.cwd() };
+      if (needs.project !== 'none') validateProjectName(ctx.project, name);
+      if (needs.storage === 'required' || (needs.storage === 'unless-local' && !local)) await checkAwsCredentials();
       const operation = async () => {
-        if (misplacedEnvironment) {
-          const valuesPath = config!.format !== 'swift' && config!.path && !config!.targets.length ? config!.path : '.env.local';
-          await moveEnvironmentToValuesFile(process.cwd(), valuesPath, misplacedEnvironment);
-          await writeManagedFile(envPath, content!);
-          console.log(`Moved env "${misplacedEnvironment}" from .env to ${valuesPath}`);
-        }
-        await command.handler({ ...argv, local });
+        if (content !== null && !needs.readOnly) await moveSelectionOutOfSchema(ctx, content);
+        await spec.run({ ...argv, local }, ctx);
       };
-      if (local || readOnly || catalog) await operation();
+      if (local || needs.readOnly) await operation();
       else await withGitUpdates(process.cwd(), operation);
     },
   };
 }
 
-function withProjectOption<T>(yargs: Argv<T>): Argv<T & ProjectArgs> {
-  return yargs.option("project", {
-    alias: "p",
-    type: "string",
-    description: "Project name (default: .env header, then directory name)",
-  }) as Argv<T & ProjectArgs>;
-}
-
-function validateProjectName(project: string, command: string): void {
-  if (!PROJECT_NAME_PATTERN.test(project)) {
-    throw new EnvManagerError(
-      `Invalid project name "${project}". Project names cannot include spaces or "|".`
-    );
-  }
-  const commandsRestrictingDefault = ['up', 'down', 'init', 'env', 'rm'];
-  if (
-    commandsRestrictingDefault.includes(command) &&
-    RESERVED_PROJECT_NAMES.includes(project)
-  ) {
-    throw new EnvManagerError(
-      `"${project}" is a reserved project name and cannot be used with ${command}`
-    );
-  }
-}
-
-function resolveProject(arg?: string): string {
-  return resolveProjectName(process.cwd(), arg);
-}
-
-function createContext(project: string): CommandContext {
+function toGroup(group: Group): CommandModule<any, any> {
   return {
-    project,
-    cwd: process.cwd(),
+    command: group.command,
+    describe: group.describe,
+    builder: (y: Argv) => y
+      .command(group.commands.map(spec => toModule(spec, `${group.command} `)))
+      .demandCommand(1, `Please specify a ${group.command} command`)
+      .strict()
+      .help(),
+    handler: () => {},
   };
 }
 
-const upCmd: CommandModule<any, any> = {
-  command: "up",
-  describe:
-    "Validate schema + current environment values, then upload to AWS",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(yargs) as Argv<ProjectArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as ProjectArgs;
-    const project = resolveProject(args.project);
-    validateProjectName(project, "up");
-    await checkAwsCredentials();
-    await upCommand(createContext(project));
-  },
-};
+const project = { project: 'project', storage: 'none' } as const;
+const named = { project: 'named', storage: 'required' } as const;
+const global = { project: 'none', storage: 'required' } as const;
 
-type DownArgs = ProjectArgs & { env?: string };
-
-const downCmd: CommandModule<any, any> = {
-  command: "down",
-  describe:
-    "Download schema + current environment values from AWS and write configured files",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(yargs).option('env', {
-      type: 'string',
-      description: 'Environment to download (defaults to the one recorded in the values file)',
-    }) as Argv<DownArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as DownArgs;
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'down');
-    await checkAwsCredentials();
-    await downCommand(createContext(project), { environment: args.env });
-  },
-};
-
-const rmCmd: CommandModule<any, any> = {
-  command: 'rm [project]',
-  describe:
-    'Delete the project secret from AWS Secrets Manager without touching local files',
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs
-      .positional('project', {
-        type: 'string',
-        description: 'Project name',
-      })
-      .option('project', {
-        alias: 'p',
-        type: 'string',
-        description: 'Project name',
-      }) as Argv<ProjectArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as ProjectArgs;
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'rm');
-    await checkAwsCredentials();
-    await rmCommand(createContext(project));
-  },
-};
-
-interface GenerateArgs extends ProjectArgs {
-  path?: string;
-  force: boolean;
-  target?: string;
-  env?: string;
+function requireArg(value: string | undefined, usage: string): string {
+  if (!value) throw new EnvManagerError(`Usage: env-manager ${usage}`);
+  return value;
 }
 
-const generateCmd: CommandModule<any, any> = {
-  command: "generate [path]",
-  aliases: ["gen"],
-  describe:
-    "Generate a Zod-validated env.ts from the .env schema in ts values mode",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(
-      yargs
-        .positional("path", {
-          type: "string",
-          description: "Output path for generated file (default: src/env.ts)",
-        })
-        .option('target', {
-          type: 'string',
-          description: 'Generate only one declared target',
-        })
-        .option("force", {
-          alias: "f",
-          type: "boolean",
-          default: false,
-          description: "Overwrite ts path stored in .env",
-        })
-        .option('env', {
-          type: 'string',
-          description: 'Render target values from this stored environment without selecting it or touching the root values',
-        })
-    ) as unknown as Argv<GenerateArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as GenerateArgs;
-    if (args.env) {
-      if (args.path) throw new EnvManagerError('--env cannot be combined with a reader path.');
-      if (args.local) throw new EnvManagerError('generate --env reads secret storage and is disabled in local mode. Use --no-local to allow it for this invocation.');
-      const project = resolveProject(args.project);
-      await checkAwsCredentials();
-      await generateFromEnvironment(createContext(project), args.env, { target: args.target });
-      return;
-    }
-    await generateCommand(createContext(resolveProject(args.project)), args.path, {
-      force: args.force,
-      target: args.target,
-    });
+const generate: Command = {
+  command: 'generate [path]',
+  aliases: ['gen'],
+  describe: 'Generate a Zod-validated env.ts from the .env schema in ts values mode',
+  builder: y => y
+    .positional('path', { type: 'string', description: 'Output path for generated file (default: src/env.ts)' })
+    .option('target', { type: 'string', description: 'Generate only one declared target' })
+    .option('force', { alias: 'f', type: 'boolean', default: false, description: 'Overwrite ts path stored in .env' })
+    .option('env', { type: 'string', description: 'Render target values from this stored environment without selecting it or touching the root values' }),
+  needs: argv => argv.env ? { project: 'project', storage: 'required' } : project,
+  run: async (argv, ctx) => {
+    if (!argv.env) return generateCommand(ctx, argv.path, { force: argv.force, target: argv.target });
+    if (argv.path) throw new EnvManagerError('--env cannot be combined with a reader path.');
+    await generateFromEnvironment(ctx, argv.env, { target: argv.target });
   },
 };
 
-const tsCmd: CommandModule<any, any> = {
-  ...generateCmd,
-  command: 'ts [path]',
-  aliases: [],
-  describe: 'Deprecated alias for generate (gen)',
-  handler: async (argv) => {
-    console.warn('Warning: env-manager ts is deprecated. Use env-manager generate (gen) instead.');
-    await generateCmd.handler(argv);
-  },
-};
-
-interface InitArgs extends ProjectArgs {
-  yes: boolean;
-  valuesFormat?: string;
-  valuesPath?: string;
-}
-
-const initCmd: CommandModule<any, any> = {
-  command: "init",
-  describe:
-    "Initialize .env from AWS if it exists, otherwise create a new template",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(
-      yargs
-        .option("yes", {
-          alias: "y",
-          type: "boolean",
-          default: false,
-          description: "Accept defaults for prompts",
-        })
-        .option('values-format', {
-          type: 'string',
-          choices: ['ts', 'swift'],
-          description: 'Values output format',
-        })
-        .option('values-path', {
-          type: 'string',
-          description: 'Values output path',
-        })
-    ) as unknown as Argv<InitArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as InitArgs;
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'init');
-    if (!args.local) await checkAwsCredentials();
-    await initCommand(createContext(project), {
-      assumeYes: args.yes,
-      local: args.local,
-      valuesFormat: args.valuesFormat,
-      valuesPath: args.valuesPath,
-    });
-  },
-};
-
-interface SetArgs extends ProjectArgs {
-  field?: string;
-  value?: string;
-}
-
-const setCmd: CommandModule<any, any> = {
-  command: 'set <field> <value>',
-  describe: 'Set project config stored in .env',
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(
-      yargs
-        .positional('field', {
-          type: 'string',
-          description: 'Config field: local, format, path, generate (legacy values.format/values.path also work)',
-        })
-        .positional('value', {
-          type: 'string',
-          description: 'Config value',
-        })
-    ) as Argv<SetArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as SetArgs;
-    if (!args.field || !args.value) {
-      throw new EnvManagerError('Usage: env-manager set <field> <value>');
-    }
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'set');
-    await setCommand(createContext(project), args.field, args.value);
-  },
-};
-
-const listCmd: CommandModule<any, any> = {
-  command: "list",
-  aliases: ["ls"],
-  describe:
-    "List all projects stored under the env-manager/<project> Secrets Manager namespace and global keys",
-  handler: async () => {
-    await checkAwsCredentials();
-    await listCommand();
-  },
-};
-
-interface PrintArgs {
-  project?: string;
-  env?: string;
-}
-
-const printCmd: CommandModule<any, any> = {
-  command: 'print [project]',
-  describe: 'Print stored environments for a project',
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs
-      .positional('project', {
-        type: 'string',
-        description: 'Project name',
-      })
-      .option('project', {
-        alias: 'p',
-        type: 'string',
-        description: 'Project name',
-      })
-      .option('env', {
-        alias: 'e',
-        type: 'string',
-        description: 'Only print one environment',
-      }) as Argv<PrintArgs>,
-  handler: async (argv) => {
-    const args = argv as PrintArgs;
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'print');
-    await checkAwsCredentials();
-    await printCommand(createContext(project), { environment: args.env });
-  },
-};
-
-interface EnvNameArgs extends ProjectArgs {
-  environment?: string;
-}
-
-const envSetCmd: CommandModule<any, any> = withCommandContext({
-  command: 'set <environment>',
-  describe: 'Select an environment and download it (local mode only switches the selector)',
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs.positional('environment', {
-      type: 'string',
-      description: 'Environment name',
-    }) as unknown as Argv<EnvNameArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as EnvNameArgs;
-    if (!args.environment) {
-      throw new EnvManagerError('Usage: env-manager env set <environment>');
-    }
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'env');
-    if (!args.local) await checkAwsCredentials();
-    await envSetCommand(createContext(project), args.environment, { local: args.local });
-  },
-});
-
-const envListCmd: CommandModule<any, any> = withCommandContext({
-  command: 'list',
-  aliases: ['ls'],
-  describe: 'List environments stored for a project',
-  handler: async (argv) => {
-    const args = argv as unknown as ProjectArgs;
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'env');
-    await checkAwsCredentials();
-    await envListCommand(createContext(project));
-  },
-});
-
-const envRmCmd: CommandModule<any, any> = withCommandContext({
-  command: 'rm <environment>',
-  describe: 'Remove an environment from AWS',
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs.positional('environment', {
-      type: 'string',
-      description: 'Environment name',
-    }) as unknown as Argv<EnvNameArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as EnvNameArgs;
-    if (!args.environment) {
-      throw new EnvManagerError('Usage: env-manager env rm <environment>');
-    }
-    const project = resolveProject(args.project);
-    validateProjectName(project, 'env');
-    await checkAwsCredentials();
-    await envRmCommand(createContext(project), args.environment);
-  },
-});
-
-const envCmd: CommandModule<any, any> = {
-  command: 'env',
-  describe: 'Manage project environments',
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(
-      yargs
-        .command(envSetCmd)
-        .command(envListCmd)
-        .command(envRmCmd)
-        .demandCommand(1, 'Please specify an env command')
-        .strict()
-        .help()
-    ) as Argv<ProjectArgs>,
-  handler: () => {},
-};
-
-interface GlobalGetArgs {
-  name?: string;
-}
-
-interface GlobalSetArgs {
-  name?: string;
-  value?: string;
-  location?: string;
-}
-
-function parseGlobalSetInput(argv: GlobalSetArgs): {
-  name: string;
-  value: string;
-  location?: string;
-} {
-  const rawArgs = hideBin(process.argv);
-  const globalIndex = rawArgs.indexOf('global');
-  let setIndex = rawArgs.indexOf('set');
-  if (globalIndex !== -1 && rawArgs[globalIndex + 1] === 'set') {
-    setIndex = globalIndex + 1;
-  }
-  const argsAfter = setIndex === -1 ? rawArgs : rawArgs.slice(setIndex + 1);
-
-  let flagsUsed = false;
-  const positional: string[] = [];
-  const consumeFlagValue = (arg: string): boolean =>
-    arg === "-n" ||
-    arg === "--name" ||
-    arg === "-v" ||
-    arg === "--value" ||
-    arg === "-l" ||
-    arg === "--location";
-
-  for (let i = 0; i < argsAfter.length; i++) {
-    const arg = argsAfter[i];
-    if (arg === '--') {
-      positional.push(...argsAfter.slice(i + 1));
-      break;
-    }
-    if (arg.startsWith('--')) {
-      if (
-        arg.startsWith('--name=') ||
-        arg.startsWith('--value=') ||
-        arg.startsWith('--location=')
-      ) {
-        flagsUsed = true;
-        continue;
-      }
-      if (consumeFlagValue(arg)) {
-        flagsUsed = true;
-        i++;
-        continue;
-      }
-      continue;
-    }
-    if (arg.startsWith('-')) {
-      if (consumeFlagValue(arg)) {
-        flagsUsed = true;
-        i++;
-        continue;
-      }
-      continue;
-    }
-    positional.push(arg);
-  }
-
-  if (flagsUsed && positional.length > 0) {
-    throw new EnvManagerError(
-      "Use either flags (-n/-v/-l) or positional args, not both."
-    );
-  }
-
-  if (!flagsUsed && positional.length !== 2 && positional.length !== 3) {
-    throw new EnvManagerError(
-      "Usage: env-manager global set <name> <value> [location]"
-    );
-  }
-
-  const name = flagsUsed ? argv.name : positional[0];
-  const value = flagsUsed ? argv.value : positional[1];
-  const location = flagsUsed ? argv.location : positional[2];
-
-  if (flagsUsed && (!value || !name || !location)) {
-    throw new EnvManagerError(
-      "Usage: env-manager global set -n <name> -v <value> -l <location>"
-    );
-  }
-
-  if (!name || !value) {
-    throw new EnvManagerError(
-      "Usage: env-manager global set <name> <value> [location]"
-    );
-  }
-
-  return { name, value, location };
-}
-
-const globalSetCmd: CommandModule<any, any> = withCommandContext({
-  command: "set [name] [value] [location]",
-  describe: "Set a global default env var",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs
-      .positional("name", {
-        type: "string",
-        description: "Global env var name",
-      })
-      .positional("value", {
-        type: "string",
-        description: "Global env var value",
-      })
-      .positional("location", {
-        type: "string",
-        description: "Where the value was generated",
-      })
-      .option("name", {
-        alias: "n",
-        type: "string",
-        description: "Global env var name",
-      })
-      .option("value", {
-        alias: "v",
-        type: "string",
-        description: "Global env var value",
-      })
-      .option("location", {
-        alias: "l",
-        type: "string",
-        description: "Where the value was generated",
-      }) as Argv<GlobalSetArgs>,
-  handler: async (argv) => {
-    await checkAwsCredentials();
-    const input = parseGlobalSetInput(argv as GlobalSetArgs);
-    await globalSetCommand(input);
-  },
-});
-
-const globalGetCmd: CommandModule<any, any> = withCommandContext({
-  command: "get [name]",
-  describe: "Get a global default env var",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs.positional("name", {
-      type: "string",
-      description: "Global env var name",
-    }) as Argv<GlobalGetArgs>,
-  handler: async (argv) => {
-    await checkAwsCredentials();
-    await globalGetCommand(argv.name);
-  },
-});
-
-const globalListCmd: CommandModule<any, any> =
-  withCommandContext({
-    command: "list",
-    aliases: ["ls"],
-    describe: "List global default env vars",
-    handler: async () => {
-      await checkAwsCredentials();
-      await globalListCommand();
+const commands: (Command | Group)[] = [
+  {
+    command: 'check',
+    describe: 'Validate configuration and output paths without changing files',
+    builder: y => y.option('strict', { type: 'boolean', default: false, description: 'Require type annotations for legacy variables too' }),
+    needs: { ...project, readOnly: true },
+    run: async (argv, ctx) => {
+      const content = await readEnvFile(ctx);
+      parseRootConfig(content, join(ctx.cwd, '.env'), argv.strict);
+      await loadProject(ctx, content);
+      console.log('Configuration is valid.');
     },
-  });
-
-interface GlobalRmArgs {
-  name?: string;
-}
-
-const globalRmCmd: CommandModule<any, any> = withCommandContext({
-  command: "rm [name]",
-  describe: "Remove a global default env var",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs
-      .positional("name", {
-        type: "string",
-        description: "Global env var name",
-      })
-      .option("name", {
-        alias: "n",
-        type: "string",
-        description: "Global env var name",
-      })
-      .demandOption("name", "Name required") as Argv<GlobalRmArgs>,
-  handler: async (argv) => {
-    if (!argv.name) {
-      throw new EnvManagerError('Usage: env-manager global rm <name>');
-    }
-    await checkAwsCredentials();
-    await globalRmCommand(argv.name);
   },
-});
-
-const globalCmd: CommandModule<any, any> = {
-  command: "global",
-  describe: "Manage global defaults",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    yargs
-      .command(globalSetCmd)
-      .command(globalGetCmd)
-      .command(globalListCmd)
-      .command(globalRmCmd)
-      .demandCommand(1, "Please specify a global command")
-      .strict()
-      .help(),
-  handler: () => {},
-};
-
-interface NewKeyArgs extends ProjectArgs {
-  key?: string;
-  list: boolean;
-  yes: boolean;
-  name?: string;
-  credit?: number;
-  unlimited?: boolean;
-  expiration?: string;
-}
-
-const newKeyCmd: CommandModule<any, any> = {
-  command: "new-key [key]",
-  describe:
-    "Create or reuse a known API key, add it to the current environment, and sync to AWS",
-  builder: (yargs: Argv<Record<string, never>>) =>
-    withProjectOption(
-      yargs
-        .positional("key", {
-          type: "string",
-          description:
-            "Known key name to create (e.g., ANTHROPIC_API_KEY, OPENROUTER_API_KEY)",
-        })
-        .option("list", {
-          alias: "l",
-          type: "boolean",
-          default: false,
-          description: "List supported keys and exit",
-        })
-        .option("yes", {
-          alias: "y",
-          type: "boolean",
-          default: false,
-          description: "Accept defaults for prompts",
-        })
-        .option("name", {
-          type: "string",
-          description:
-            "OpenRouter key display name (default: project name; OPENROUTER_API_KEY only)",
-        })
-        .option("credit", {
-          type: "number",
-          description:
-            "OpenRouter key credit limit in USD/month (default: 10; OPENROUTER_API_KEY only)",
-        })
-        .option("unlimited", {
-          type: "boolean",
-          description:
-            "Create OpenRouter key without a credit limit (OPENROUTER_API_KEY only)",
-        })
-        .option("expiration", {
-          type: "string",
-          description:
-            "OpenRouter key expiration (UTC ISO-8601, e.g., 2027-12-31T23:59:59Z; OPENROUTER_API_KEY only)",
-        })
-    ) as unknown as Argv<NewKeyArgs>,
-  handler: async (argv) => {
-    const args = argv as unknown as NewKeyArgs;
-    if (argv.list) {
-      listKeysCommand();
-      return;
-    }
-    if (!args.key) {
-      throw new EnvManagerError(
-        "Key name required. Usage: env-manager new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys"
-      );
-    }
-    const project = resolveProject(args.project);
-    await checkAwsCredentials();
-    await newKeyCommand(createContext(project), args.key, {
-      assumeYes: args.yes,
-      name: args.name,
-      credit: args.credit,
-      unlimited: args.unlimited ? true : undefined,
-      expiration: args.expiration,
-    });
+  {
+    command: 'info',
+    describe: `Print project setup as JSON: environments, targets, outputs, and variables (exit ${NotInitializedError.exitCode} without a setup)`,
+    needs: { ...project, readOnly: true },
+    run: (argv, ctx) => infoCommand(ctx, { local: argv.local }),
   },
-};
-
-const checkCmd: CommandModule<any, any> = {
-  command: 'check',
-  describe: 'Validate configuration and output paths without changing files',
-  builder: (yargs: Argv<Record<string, never>>) => withProjectOption(yargs.option('strict', {
-    type: 'boolean', default: false, description: 'Require type annotations for legacy variables too',
-  })),
-  handler: async (argv) => {
-    const file = join(process.cwd(), '.env');
-    const content = await Bun.file(file).text();
-    parseRootConfig(content, file, argv.strict);
-    await planGeneration(createContext(resolveProject(argv.project)), content);
-    console.log('Configuration is valid.');
+  {
+    command: 'format',
+    describe: 'Normalize .env formatting while preserving comments, values, order, and scopes',
+    needs: project,
+    run: async (_argv, ctx) => {
+      const file = join(ctx.cwd, '.env');
+      const content = await Bun.file(file).text();
+      await writeManagedFile(file, formatRootConfig(content, file));
+      console.log('Formatted .env');
+    },
   },
-};
-
-const infoCmd: CommandModule<any, any> = {
-  command: 'info',
-  describe: `Print project setup as JSON: environments, targets, outputs, and variables (exit ${NotInitializedError.exitCode} without a setup)`,
-  builder: (yargs: Argv<Record<string, never>>) => withProjectOption(yargs),
-  handler: async (argv) => {
-    await infoCommand(createContext(resolveProject(argv.project)), { local: argv.local === true });
+  {
+    command: 'up',
+    describe: 'Validate schema + current environment values, then upload to AWS',
+    needs: { project: 'project', storage: 'required' },
+    run: (_argv, ctx) => upCommand(ctx),
   },
-};
-
-const formatCmd: CommandModule<any, any> = {
-  command: 'format',
-  describe: 'Normalize .env formatting while preserving comments, values, order, and scopes',
-  builder: (yargs: Argv<Record<string, never>>) => withProjectOption(yargs),
-  handler: async () => {
-    const file = join(process.cwd(), '.env');
-    const content = await Bun.file(file).text();
-    const formatted = formatRootConfig(content, file);
-    if (formatted !== content) await writeManagedFile(file, formatted);
-    console.log('Formatted .env');
+  {
+    command: 'down',
+    describe: 'Download schema + current environment values from AWS and write configured files',
+    builder: y => y.option('env', { type: 'string', description: 'Environment to download (defaults to the one recorded in the values file)' }),
+    needs: { project: 'clone', storage: 'required' },
+    run: (argv, ctx) => downCommand(ctx, { environment: argv.env }),
   },
-};
+  {
+    command: 'rm [project]',
+    describe: 'Delete the project secret from AWS Secrets Manager without touching local files',
+    builder: y => y
+      .positional('project', { type: 'string', description: 'Project name' })
+      .option('project', { alias: 'p', type: 'string', description: 'Project name' }),
+    needs: named,
+    run: (_argv, ctx) => rmCommand(ctx),
+  },
+  generate,
+  {
+    ...generate,
+    command: 'ts [path]',
+    aliases: [],
+    describe: 'Deprecated alias for generate (gen)',
+    run: async (argv, ctx) => {
+      console.warn('Warning: env-manager ts is deprecated. Use env-manager generate (gen) instead.');
+      await generate.run(argv, ctx);
+    },
+  },
+  {
+    command: 'init',
+    describe: 'Initialize .env from AWS if it exists, otherwise create a new template',
+    builder: y => y
+      .option('yes', { alias: 'y', type: 'boolean', default: false, description: 'Accept defaults for prompts' })
+      .option('values-format', { type: 'string', choices: ['ts', 'swift'], description: 'Values output format' })
+      .option('values-path', { type: 'string', description: 'Values output path' }),
+    needs: { project: 'init', storage: 'unless-local' },
+    run: (argv, ctx) => initCommand(ctx, {
+      assumeYes: argv.yes,
+      local: argv.local,
+      valuesFormat: argv.valuesFormat,
+      valuesPath: argv.valuesPath,
+    }),
+  },
+  {
+    command: 'list',
+    aliases: ['ls'],
+    describe: 'List all projects stored under the env-manager/<project> Secrets Manager namespace and global keys',
+    needs: global,
+    run: () => listCommand(),
+  },
+  {
+    command: 'print [project]',
+    describe: 'Print stored environments for a project',
+    builder: y => y
+      .positional('project', { type: 'string', description: 'Project name' })
+      .option('project', { alias: 'p', type: 'string', description: 'Project name' })
+      .option('env', { alias: 'e', type: 'string', description: 'Only print one environment' }),
+    needs: named,
+    run: (argv, ctx) => printCommand(ctx, { environment: argv.env }),
+  },
+  {
+    command: 'set <field> <value>',
+    describe: 'Set project config stored in .env',
+    builder: y => y
+      .positional('field', { type: 'string', description: 'Config field: local, format, path, generate (legacy values.format/values.path also work)' })
+      .positional('value', { type: 'string', description: 'Config value' }),
+    // Turning local mode on is itself a local-only change, so it is not committed.
+    needs: argv => ({ ...project, local: argv.field === 'local' && argv.value === 'true' ? true : undefined }),
+    run: (argv, ctx) => setCommand(ctx, requireArg(argv.field, 'set <field> <value>'), requireArg(argv.value, 'set <field> <value>')),
+  },
+  {
+    command: 'env',
+    describe: 'Manage project environments',
+    commands: [
+      {
+        command: 'set <environment>',
+        describe: 'Select an environment and download it (local mode only switches the selector)',
+        builder: y => y.positional('environment', { type: 'string', description: 'Environment name' }),
+        needs: { project: 'project', storage: 'unless-local' },
+        run: (argv, ctx) => envSetCommand(ctx, requireArg(argv.environment, 'env set <environment>'), { local: argv.local }),
+      },
+      {
+        command: 'list',
+        aliases: ['ls'],
+        describe: 'List environments stored for a project',
+        needs: named,
+        run: (_argv, ctx) => envListCommand(ctx),
+      },
+      {
+        command: 'rm <environment>',
+        describe: 'Remove an environment from AWS',
+        builder: y => y.positional('environment', { type: 'string', description: 'Environment name' }),
+        needs: named,
+        run: (argv, ctx) => envRmCommand(ctx, requireArg(argv.environment, 'env rm <environment>')),
+      },
+    ],
+  },
+  {
+    command: 'global',
+    describe: 'Manage global defaults',
+    commands: [
+      {
+        command: 'set [name] [value] [location]',
+        describe: 'Set a global default env var',
+        builder: y => y
+          .positional('name', { type: 'string', description: 'Global env var name' })
+          .positional('value', { type: 'string', description: 'Global env var value' })
+          .positional('location', { type: 'string', description: 'Where the value was generated' })
+          .option('name', { alias: 'n', type: 'string', description: 'Global env var name' })
+          .option('value', { alias: 'v', type: 'string', description: 'Global env var value' })
+          .option('location', { alias: 'l', type: 'string', description: 'Where the value was generated' }),
+        needs: global,
+        run: argv => globalSetCommand({
+          name: requireArg(argv.name, 'global set <name> <value> [location]'),
+          value: requireArg(argv.value, 'global set <name> <value> [location]'),
+          location: argv.location,
+        }),
+      },
+      {
+        command: 'get [name]',
+        describe: 'Get a global default env var',
+        builder: y => y.positional('name', { type: 'string', description: 'Global env var name' }),
+        needs: global,
+        run: argv => globalGetCommand(argv.name),
+      },
+      {
+        command: 'list',
+        aliases: ['ls'],
+        describe: 'List global default env vars',
+        needs: global,
+        run: () => globalListCommand(),
+      },
+      {
+        command: 'rm [name]',
+        describe: 'Remove a global default env var',
+        builder: y => y
+          .positional('name', { type: 'string', description: 'Global env var name' })
+          .option('name', { alias: 'n', type: 'string', description: 'Global env var name' }),
+        needs: global,
+        run: argv => globalRmCommand(requireArg(argv.name, 'global rm <name>')),
+      },
+    ],
+  },
+  {
+    command: 'new-key [key]',
+    describe: 'Create or reuse a known API key, add it to the current environment, and sync to AWS',
+    builder: y => y
+      .positional('key', { type: 'string', description: 'Known key name to create (e.g., ANTHROPIC_API_KEY, OPENROUTER_API_KEY)' })
+      .option('list', { alias: 'l', type: 'boolean', default: false, description: 'List supported keys and exit' })
+      .option('yes', { alias: 'y', type: 'boolean', default: false, description: 'Accept defaults for prompts' })
+      .option('name', { type: 'string', description: 'OpenRouter key display name (default: project name; OPENROUTER_API_KEY only)' })
+      .option('credit', { type: 'number', description: 'OpenRouter key credit limit in USD/month (default: 10; OPENROUTER_API_KEY only)' })
+      .option('unlimited', { type: 'boolean', description: 'Create OpenRouter key without a credit limit (OPENROUTER_API_KEY only)' })
+      .option('expiration', { type: 'string', description: 'OpenRouter key expiration (UTC ISO-8601, e.g., 2027-12-31T23:59:59Z; OPENROUTER_API_KEY only)' }),
+    needs: argv => argv.list ? { project: 'none', storage: 'none', readOnly: true } : { project: 'project', storage: 'required' },
+    run: async (argv, ctx) => {
+      if (argv.list) return listKeysCommand();
+      const key = requireArg(argv.key, "new-key <KEY_NAME>\nRun 'env-manager new-key --list' to see available keys");
+      await newKeyCommand(ctx, key, {
+        assumeYes: argv.yes,
+        name: argv.name,
+        credit: argv.credit,
+        unlimited: argv.unlimited ? true : undefined,
+        expiration: argv.expiration,
+      });
+    },
+  },
+];
 
 async function run() {
   loadOwnEnv(resolveOwnPackageRoot(import.meta.url));
-  const rootCommands: Array<CommandModule<any, any>> = [
-    checkCmd,
-    infoCmd,
-    formatCmd,
-    upCmd,
-    downCmd,
-    rmCmd,
-    generateCmd,
-    tsCmd,
-    initCmd,
-    listCmd,
-    printCmd,
-    setCmd,
-    envCmd,
-    globalCmd,
-    newKeyCmd,
-  ];
-  await withLocalOption(yargs(hideBin(process.argv)))
+  await yargs(hideBin(process.argv))
+    .option('local', { type: 'boolean', description: 'Use local files only; --no-local overrides the .env setting' })
     .scriptName('env-manager')
-    .usage(
-      '$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync.'
-    )
-    .command(rootCommands.map(withCommandContext) as Array<CommandModule<{}, any>>)
+    .usage('$0 <command> [options]\n\nManage .env schema, local values, and AWS Secrets Manager sync.')
+    .command(commands.map(spec => 'commands' in spec ? toGroup(spec) : toModule(spec, '')))
     .demandCommand(1, 'Please specify a command')
     .strict()
     .fail((message, error, cli) => {
@@ -890,10 +415,6 @@ async function run() {
 }
 
 run().catch((e) => {
-  if (e instanceof EnvManagerError) {
-    console.error(`Error: ${e.message}`);
-  } else {
-    console.error(e);
-  }
+  console.error(e instanceof EnvManagerError ? `Error: ${e.message}` : e);
   process.exit(e instanceof NotInitializedError ? NotInitializedError.exitCode : 1);
 });

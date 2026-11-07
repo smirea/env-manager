@@ -1,62 +1,33 @@
-import { writeManagedFile } from './git-updates';
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
-import type { EnvValues, EnvVarSchema } from "./types";
-import { EnvManagerError } from "./types";
+import { resolve } from 'node:path';
+import { EnvManagerError } from './errors';
+import { writeManagedFile } from './files';
+import { schemaValue, type EnvValues, type EnvVarSchema } from './parser';
 
-function resolvePath(cwd: string, filePath: string): string {
-  return path.resolve(cwd, filePath);
-}
-
-function getFilePathValue(
-  schema: EnvVarSchema,
-  values: EnvValues
-): string | null {
-  return values[schema.name] ?? schema.defaultValue;
-}
-
-async function readUtf8File(
-  file: { arrayBuffer: () => Promise<ArrayBuffer> },
-  name: string,
-  fullPath: string
-): Promise<string> {
-  try {
-    const data = await file.arrayBuffer();
-    return new TextDecoder("utf-8", { fatal: true }).decode(data);
-  } catch {
-    throw new EnvManagerError(
-      `File for ${name} is not valid UTF-8: ${fullPath}`
-    );
+function fileEntries(schema: EnvVarSchema[], values: EnvValues, cwd: string): { name: string; path: string }[] {
+  const entries: { name: string; path: string }[] = [];
+  for (const entry of schema) {
+    if (entry.type !== 'file') continue;
+    const value = schemaValue(entry, values);
+    if (!value) {
+      if (entry.optional) continue;
+      throw new EnvManagerError(`Required file path ${entry.name} is not set`);
+    }
+    entries.push({ name: entry.name, path: resolve(cwd, value) });
   }
+  return entries;
 }
 
-export async function collectFilePayload(
-  schema: EnvVarSchema[],
-  values: EnvValues,
-  cwd: string
-): Promise<Record<string, string>> {
+export async function collectFilePayload(schema: EnvVarSchema[], values: EnvValues, cwd: string): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
-
-  for (const s of schema) {
-    if (s.type !== "file") continue;
-    const rawValue = getFilePathValue(s, values);
-
-    if (rawValue === null || rawValue === undefined || rawValue === "") {
-      if (s.optional) continue;
-      throw new EnvManagerError(`Required file path ${s.name} is not set`);
+  for (const { name, path } of fileEntries(schema, values, cwd)) {
+    const file = Bun.file(path);
+    if (!(await file.exists())) throw new EnvManagerError(`File for ${name} not found at ${path}`);
+    try {
+      files[name] = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      throw new EnvManagerError(`File for ${name} is not valid UTF-8: ${path}`);
     }
-
-    const fullPath = resolvePath(cwd, rawValue);
-    const file = Bun.file(fullPath);
-    if (!(await file.exists())) {
-      throw new EnvManagerError(
-        `File for ${s.name} not found at ${fullPath}`
-      );
-    }
-
-    files[s.name] = await readUtf8File(file, s.name, fullPath);
   }
-
   return files;
 }
 
@@ -66,23 +37,8 @@ export async function writeFilesFromPayload(
   files: Record<string, string> | undefined,
   cwd: string
 ): Promise<void> {
-  for (const s of schema) {
-    if (s.type !== "file") continue;
-    const rawValue = getFilePathValue(s, values);
-
-    if (rawValue === null || rawValue === undefined || rawValue === "") {
-      if (s.optional) continue;
-      throw new EnvManagerError(`Missing file path for ${s.name}`);
-    }
-
-    if (!files || !Object.prototype.hasOwnProperty.call(files, s.name)) {
-      throw new EnvManagerError(
-        `Missing file contents for ${s.name} in secret`
-      );
-    }
-
-    const fullPath = resolvePath(cwd, rawValue);
-    await mkdir(path.dirname(fullPath), { recursive: true });
-    await writeManagedFile(fullPath, files[s.name]);
+  for (const { name, path } of fileEntries(schema, values, cwd)) {
+    if (!files || !Object.hasOwn(files, name)) throw new EnvManagerError(`Missing file contents for ${name} in secret`);
+    await writeManagedFile(path, files[name]);
   }
 }

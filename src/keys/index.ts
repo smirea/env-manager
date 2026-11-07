@@ -1,34 +1,20 @@
-import { anthropicKey } from "./anthropic";
-import { openRouterKey } from "./openrouter";
+import { anthropicKey } from './anthropic';
+import { openRouterKey } from './openrouter';
 
-export interface KeyDefinition {
-  envName: string;
-  description: string;
-  schemaType: string;
-  validate(key: string): boolean;
-  resolve(projectName: string, options?: KeyResolveOptions): Promise<string>;
-}
-
-export interface KeyResolveOptions {
+export interface KeyOptions {
   name?: string;
   credit?: number;
   unlimited?: boolean;
   expiration?: string;
 }
 
-const KEYS: Record<string, KeyDefinition> = {
-  ANTHROPIC_API_KEY: anthropicKey,
-  OPENROUTER_API_KEY: openRouterKey,
-};
-
-export function getKey(name: string): KeyDefinition | undefined {
-  return KEYS[name];
+export interface KeyDefinition {
+  envName: string;
+  description: string;
+  schemaType: string;
+  acceptsOptions: boolean;
+  validate(key: string): boolean;
+  resolve(projectName: string, options: KeyOptions, assumeYes: boolean): Promise<string>;
 }
 
-export function listKeys(): KeyDefinition[] {
-  return Object.values(KEYS);
-}
-
-export function listKeyNames(): string[] {
-  return Object.keys(KEYS);
-}
+export const KEYS: KeyDefinition[] = [anthropicKey, openRouterKey];

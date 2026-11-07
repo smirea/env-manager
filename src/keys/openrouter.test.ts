@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD,
   extractOpenRouterApiKey,
   isValidOpenRouterApiKey,
   normalizeOpenRouterOptions,
@@ -34,7 +33,7 @@ describe("openrouter key generator", () => {
   test("normalizes defaults from project name", () => {
     expect(normalizeOpenRouterOptions("my-project")).toEqual({
       name: "my-project",
-      limit: OPENROUTER_DEFAULT_MONTHLY_LIMIT_USD,
+      limit: 10,
       expiresAt: null,
     });
   });

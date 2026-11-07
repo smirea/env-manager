@@ -1,39 +1,18 @@
-import { planGeneration } from './generate';
-import { parseRootConfig, upsertSetting } from '../config';
-import { writeManagedFile } from '../git-updates';
-import type { CommandContext } from '../types';
-import { EnvManagerError } from '../types';
+import { join } from 'node:path';
+import { isSettingField, SETTING_FIELDS, settingKey, upsertSetting } from '../config';
+import { EnvManagerError } from '../errors';
+import { writeManagedFile } from '../files';
+import { loadProject, parseProjectConfig, readEnvFile, type CommandContext } from '../project';
 
-const FIELDS = ['local', 'format', 'path', 'generate', 'values.format', 'values.path'];
-
-export async function setCommand(
-  ctx: CommandContext,
-  field: string,
-  value: string
-): Promise<void> {
-  const envPath = `${ctx.cwd}/.env`;
-  const envFile = Bun.file(envPath);
-  if (!(await envFile.exists())) {
-    throw new EnvManagerError(`.env not found at ${envPath}`);
+export async function setCommand(ctx: CommandContext, field: string, value: string): Promise<void> {
+  if (!isSettingField(field)) {
+    throw new EnvManagerError(`Unknown field "${field}". Supported fields: ${SETTING_FIELDS.join(', ')}`);
   }
-
-  if (!FIELDS.includes(field)) {
-    throw new EnvManagerError(`Unknown field "${field}". Supported fields: ${FIELDS.join(', ')}`);
-  }
-  const content = await envFile.text();
-  const parsed = parseRootConfig(content, envPath);
-  if (parsed.header && parsed.header.project !== ctx.project) {
-    throw new EnvManagerError(
-      `.env project "${parsed.header.project}" does not match --project "${ctx.project}"`
-    );
-  }
-
-  const normalizedField = parsed.modern ? field.replace('values.', '') : field;
-  const updated = upsertSetting(content, normalizedField, value);
-  const config = parseRootConfig(updated, envPath);
-  const incompleteLegacy = !config.modern && !config.targets.length && !!config.format !== !!config.path;
-  if (field !== 'local' && !incompleteLegacy) await planGeneration(ctx, updated);
-  await writeManagedFile(envPath, updated);
-
-  console.log(`Set ${normalizedField} to ${value}`);
+  const content = await readEnvFile(ctx);
+  const key = parseProjectConfig(ctx, content).modern ? settingKey(field) : field;
+  const updated = upsertSetting(content, key, value);
+  if (settingKey(field) === 'local') parseProjectConfig(ctx, updated);
+  else await loadProject(ctx, updated);
+  await writeManagedFile(join(ctx.cwd, '.env'), updated);
+  console.log(`Set ${key} to ${value}`);
 }

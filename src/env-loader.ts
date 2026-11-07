@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnvValues } from './parser';
-import { EnvManagerError } from './types';
+import { EnvManagerError } from './errors';
 
 export function resolveOwnPackageRoot(moduleUrl: string): string {
   const modulePath = realpathSync(fileURLToPath(moduleUrl));

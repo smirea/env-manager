@@ -1,8 +1,9 @@
 import { access, lstat, realpath, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { configError, relativeOutput } from './config';
-import { EnvManagerError, type CommandContext } from './types';
+import { relativeOutput } from './config';
+import { configError, EnvManagerError } from './errors';
+import { readMetadata } from './metadata';
 
 async function physicalPath(path: string): Promise<string> {
   try {
@@ -22,11 +23,11 @@ function inside(directory: string, path: string): boolean {
 
 export type OutputPath = { path: string; directory: string; line: number; target?: string; source?: boolean };
 
-export async function preflightPaths(ctx: CommandContext, outputs: OutputPath[], source: string): Promise<void> {
-  const file = join(ctx.cwd, '.env');
-  const root = await realpath(ctx.cwd);
+export async function preflightPaths(projectRoot: string, project: string, outputs: OutputPath[], source: string): Promise<void> {
+  const file = join(projectRoot, '.env');
+  const root = await realpath(projectRoot);
   const schemaPath = await physicalPath(file);
-  const sourcePath = await physicalPath(join(ctx.cwd, source)).catch(error => configError(file, 1, `Cannot resolve values source: ${error.message}`));
+  const sourcePath = await physicalPath(join(projectRoot, source)).catch(error => configError(file, 1, `Cannot resolve values source: ${error.message}`));
   const seen = new Set<string>();
   for (const output of outputs) {
     try {
@@ -43,12 +44,9 @@ export async function preflightPaths(ctx: CommandContext, outputs: OutputPath[],
       if (seen.has(path) || outputs.some(other => other !== output && inside(path, resolve(other.path)) && path !== resolve(other.path))) configError(file, output.line, `Output collision at "${output.path}".`);
       seen.add(path);
       if (stat) {
-        const content = await readFile(path, 'utf8');
-        const project = content.match(/^(?:#|\/\/)\s*env-manager:\s*([^\s|]+)/m)?.[1];
-        const target = content.match(/^(?:#|\/\/)\s*env-manager target:\s*(\S+)\s*$/m)?.[1];
-        const pointer = content.match(/^(?:#|\/\/)\s*env-manager root:\s*(.+?)\s*$/m)?.[1];
-        const damagedChild = output.target && (project || target || pointer) && (!project || !target || !pointer);
-        if (damagedChild || (project && project !== ctx.project) || (target && target !== output.target) || (pointer && await physicalPath(resolve(dirname(output.path), pointer)) !== root)) {
+        const owner = readMetadata(await readFile(path, 'utf8'));
+        const damagedChild = output.target && (owner.project || owner.target || owner.root) && (!owner.project || !owner.target || !owner.root);
+        if (damagedChild || (owner.project && owner.project !== project) || (owner.target && owner.target !== output.target) || (owner.root && await physicalPath(resolve(dirname(output.path), owner.root)) !== root)) {
           configError(file, output.line, `Output "${output.path}" belongs to another project, target, or root.`);
         }
       }

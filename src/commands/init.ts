@@ -1,23 +1,13 @@
 import { defaultValuesPath, upsertSetting } from '../config';
-import { planGeneration } from './generate';
+import { EnvManagerError } from '../errors';
+import { readText, writeManagedFile } from '../files';
+import { formatHeader } from '../metadata';
+import { parseEnvFile, parseEnvValues } from '../parser';
+import { loadProject, type CommandContext, type Project } from '../project';
+import { confirm } from '../prompt';
+import { GLOBAL_LABEL, readGlobals, readProject, requireEnvironment } from '../store';
+import { readSelection, readValues, writeSourceValues } from '../values';
 import { pullEnvironment } from './down';
-import { writeManagedFile } from '../git-updates';
-import { createAwsAdapter, secretName } from "../aws";
-import {
-  resolveEnvironment,
-} from "../environment";
-import { GLOBAL_LABEL, GLOBAL_PROJECT } from "../global";
-import { formatHeaderLine, parseEnvFile, parseEnvValues, parseHeader } from "../parser";
-import { normalizeProjectSecret } from "../project-secret";
-import { promptLine } from "../prompt";
-import type { CommandContext, EnvVarSchema } from "../types";
-import { EnvManagerError } from "../types";
-import {
-  readValuesForConfig,
-  resolveValuesConfig,
-  type ValuesConfig,
-  writeValuesForConfig,
-} from "../values-config";
 
 const TEMPLATE = `# env-manager: {{PROJECT}}
 
@@ -32,217 +22,79 @@ type InitOptions = {
   valuesPath?: string;
 };
 
-async function promptYesNo(
-  question: string,
-  assumeYes: boolean
-): Promise<boolean> {
-  if (assumeYes) {
-    return true;
-  }
-  if (!process.stdin.isTTY) {
-    throw new EnvManagerError(
-      "Non-interactive shell detected. Re-run with --yes to accept defaults."
-    );
-  }
-  let prompt = `${question} (Y/n): `;
-  while (true) {
-    const answer = (await promptLine(prompt)).trim().toLowerCase();
-    if (answer === "" || answer === "y" || answer === "yes") {
-      return true;
-    }
-    if (answer === "n" || answer === "no") {
-      return false;
-    }
-    prompt = "Please answer Y or n: ";
-  }
+type Settings = { format?: 'ts' | 'swift'; path?: string; local: boolean };
+
+function parseSettings(options: InitOptions): Settings {
+  if (options.valuesFormat === undefined && options.valuesPath === undefined) return { local: options.local === true };
+  const format = options.valuesFormat;
+  if (!format) throw new EnvManagerError('Use --values-format with --values-path.');
+  if (format !== 'ts' && format !== 'swift') throw new EnvManagerError('Values format must be ts or swift.');
+  return { format, path: options.valuesPath ?? defaultValuesPath(format), local: options.local === true };
 }
 
-type CopyGlobalDefaultsParams = {
-  aws: ReturnType<typeof createAwsAdapter>;
-  ctx: CommandContext;
-  valuesConfig: ValuesConfig;
-  assumeYes: boolean;
-  environment: string;
-  restrictToNames: Set<string> | null;
-  localSchema: EnvVarSchema[];
-  project: string;
-};
+function applySettings(content: string, settings: Settings): string {
+  let updated = content;
+  if (settings.format) updated = upsertSetting(upsertSetting(updated, 'format', settings.format), 'path', settings.path!);
+  return settings.local ? upsertSetting(updated, 'local', 'true') : updated;
+}
 
-async function copyGlobalDefaults({
-  aws,
-  ctx,
-  valuesConfig,
-  assumeYes,
-  environment,
-  restrictToNames,
-  localSchema,
-  project,
-}: CopyGlobalDefaultsParams): Promise<void> {
-  const globalSecret = await aws.getSecret(secretName(GLOBAL_PROJECT));
-  if (!globalSecret?.values) {
+async function copyGlobalDefaults(project: Project, assumeYes: boolean, restrictToNames: Set<string> | null): Promise<void> {
+  const globals = await readGlobals();
+  const available = Object.keys(globals.values).filter(name => globals.values[name]);
+  if (available.length === 0) return;
+  const candidates = restrictToNames ? available.filter(name => restrictToNames.has(name)) : available;
+  if (candidates.length === 0) {
+    console.log(restrictToNames?.size
+      ? `\nNo overlapping keys between .env and ${GLOBAL_LABEL}.`
+      : `\nNo variables declared in .env to match with ${GLOBAL_LABEL}.`);
     return;
   }
 
-  const globalValues = parseEnvValues(globalSecret.values);
-  const globalParsed = parseEnvFile(globalSecret.schema);
-  let candidateNames = globalParsed.schema.map((s) => s.name);
-
-  if (candidateNames.length === 0) {
-    return;
-  }
-
-  if (restrictToNames) {
-    candidateNames = candidateNames.filter((name) =>
-      restrictToNames.has(name)
-    );
-    if (candidateNames.length === 0) {
-      if (restrictToNames.size === 0) {
-        console.log(
-          `\nNo variables declared in .env to match with ${GLOBAL_LABEL}.`
-        );
-      } else {
-        console.log(
-          `\nNo overlapping keys between .env and ${GLOBAL_LABEL}.`
-        );
-      }
-      return;
-    }
-  }
-
-  const matchLabel = restrictToNames ? " matching your .env" : "";
-  console.log(
-    `\nFound ${candidateNames.length} key(s) in ${GLOBAL_LABEL}${matchLabel}:`
-  );
-  for (const name of candidateNames) {
-    console.log(`  - ${name}`);
-  }
+  console.log(`\nFound ${candidates.length} key(s) in ${GLOBAL_LABEL}${restrictToNames ? ' matching your .env' : ''}:`);
+  for (const name of candidates) console.log(`  - ${name}`);
   console.log();
 
-  const localValues = await readValuesForConfig(ctx, valuesConfig);
-
+  const values = await readValues(project.root, project.values);
   let copiedAny = false;
-  for (const name of candidateNames) {
-    const value = globalValues[name];
-    if (!value) continue;
-
-    const useIt = await promptYesNo(
-      `Use ${name} from ${GLOBAL_LABEL}?`,
-      assumeYes
-    );
-    if (useIt && localValues[name] !== value) {
-      localValues[name] = value;
+  for (const name of candidates) {
+    if (await confirm(`Use ${name} from ${GLOBAL_LABEL}?`, assumeYes) && values[name] !== globals.values[name]) {
+      values[name] = globals.values[name];
       copiedAny = true;
       console.log(`  Added ${name}`);
     }
   }
-
   if (copiedAny) {
-    await writeValuesForConfig(
-      ctx,
-      valuesConfig,
-      localSchema,
-      localValues,
-      environment,
-      {
-        project,
-        version: null,
-      }
-    );
-    console.log(`\nCopied selected keys to ${valuesConfig.path}`);
+    await writeSourceValues(project.root, project.name, project.values, project.config.schema, values);
+    console.log(`\nCopied selected keys to ${project.values.path}`);
   }
 }
 
-function getInitValuesConfig(options: InitOptions): ValuesConfig | null {
-  const hasFormat = options.valuesFormat !== undefined;
-  const hasPath = options.valuesPath !== undefined;
-
-  if (!hasFormat && !hasPath) {
-    return null;
-  }
-
-  if (!options.valuesFormat) throw new EnvManagerError('Use --values-format with --values-path.');
-  const format = options.valuesFormat;
-  if (format !== 'ts' && format !== 'swift') throw new EnvManagerError('Values format must be ts or swift.');
-  return { format, path: options.valuesPath ?? defaultValuesPath(format) };
-}
-
-export async function initCommand(
-  ctx: CommandContext,
-  options: InitOptions = {}
-): Promise<void> {
-  const assumeYes = options.assumeYes === true;
-  const initValuesConfig = getInitValuesConfig(options);
+export async function initCommand(ctx: CommandContext, options: InitOptions = {}): Promise<void> {
   const envPath = `${ctx.cwd}/.env`;
-  const envFile = Bun.file(envPath);
-  const envAlreadyExists = await envFile.exists();
-  const aws = options.local ? null : createAwsAdapter();
-  let envContent = envAlreadyExists ? await envFile.text() : "";
+  const settings = parseSettings(options);
+  const existing = await readText(envPath);
 
-  if (!envAlreadyExists) {
-    const secret = await aws?.getSecret(secretName(ctx.project));
-
+  if (existing === null && !options.local) {
+    const secret = await readProject(ctx.project);
     if (secret) {
-      const projectSecret = normalizeProjectSecret(secret);
-      const schemaContent = initValuesConfig
-        ? upsertSetting(upsertSetting(projectSecret.schema, 'format', initValuesConfig.format), 'path', initValuesConfig.path)
-        : projectSecret.schema;
-      await planGeneration(ctx, schemaContent);
-      const valuesConfig = await resolveValuesConfig(ctx, schemaContent);
-      const environment = await resolveEnvironment(ctx.cwd, {
-        valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
-      });
-      const envPayload = projectSecret.environments[environment];
-      if (!envPayload) {
-        throw new EnvManagerError(
-          `Environment "${environment}" not found for project "${ctx.project}"`
-        );
-      }
-
-      await pullEnvironment(ctx, schemaContent, environment, envPayload);
-      console.log(
-        `Downloaded .env from AWS for project "${ctx.project}" environment "${environment}"`
-      );
+      const project = await loadProject(ctx, applySettings(secret.schema, settings));
+      const { environment } = await readSelection(project.root, project.values);
+      await pullEnvironment(project, environment, requireEnvironment(secret, ctx.project, environment));
+      console.log(`Downloaded .env from AWS for project "${ctx.project}" environment "${environment}"`);
       return;
     }
-  } else {
-    const adopting = !envContent.split('\n').some(line => parseHeader(line));
-    if (adopting) envContent = `${formatHeaderLine({ project: ctx.project, version: null })}\n\n${envContent}`;
-    if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
-    if (initValuesConfig) envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
-    await planGeneration(ctx, envContent);
-    await writeManagedFile(envPath, envContent);
-    console.log(adopting
-      ? `Adopted existing .env as project "${ctx.project}" at ${envPath}.`
-      : `.env already exists at ${envPath}, skipping creation.`);
   }
 
-  const restrictToNames = envAlreadyExists ? new Set(Object.keys(parseEnvValues(envContent))) : null;
-  if (!envAlreadyExists) {
-    envContent = TEMPLATE.replace("{{PROJECT}}", ctx.project);
-    if (initValuesConfig) {
-      envContent = upsertSetting(upsertSetting(envContent, 'format', initValuesConfig.format), 'path', initValuesConfig.path);
-    }
-    if (options.local) envContent = upsertSetting(envContent, 'local', 'true');
-    await planGeneration(ctx, envContent);
-    await writeManagedFile(envPath, envContent);
-    console.log(`Created new .env template for project "${ctx.project}"`);
-  }
-  const valuesConfig = await resolveValuesConfig(ctx, envContent);
-  const environment = await resolveEnvironment(ctx.cwd, {
-    valuesPath: valuesConfig.format === 'ts' ? valuesConfig.path : undefined,
-  });
-  const localSchema = parseEnvFile(envContent).schema;
+  const adopting = existing !== null && parseEnvFile(existing).project === null;
+  const base = existing === null
+    ? TEMPLATE.replace('{{PROJECT}}', ctx.project)
+    : adopting ? `${formatHeader('#', ctx.project, null)}\n\n${existing}` : existing;
+  const project = await loadProject(ctx, applySettings(base, settings));
+  await writeManagedFile(envPath, project.content);
+  if (existing === null) console.log(`Created new .env template for project "${ctx.project}"`);
+  else if (adopting) console.log(`Adopted existing .env as project "${ctx.project}" at ${envPath}.`);
+  else console.log(`.env already exists at ${envPath}, skipping creation.`);
 
-  if (!aws) return;
-
-  await copyGlobalDefaults({
-    aws,
-    ctx,
-    valuesConfig,
-    assumeYes,
-    environment,
-    restrictToNames,
-    localSchema,
-    project: ctx.project,
-  });
+  if (options.local) return;
+  await copyGlobalDefaults(project, options.assumeYes === true, existing === null ? null : new Set(Object.keys(parseEnvValues(existing))));
 }

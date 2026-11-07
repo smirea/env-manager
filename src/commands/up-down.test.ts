@@ -1,22 +1,8 @@
-import { describe, expect, mock, spyOn, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { SecretPayload } from '../types';
-
-const secrets = new Map<string, SecretPayload>();
-const puts: SecretPayload[] = [];
-mock.module('../aws', () => ({
-  secretName: (project: string) => `env-manager/${project}`,
-  checkAwsCredentials: async () => {},
-  createAwsAdapter: () => ({
-    getSecret: async (name: string) => structuredClone(secrets.get(name) ?? null),
-    putSecret: async (name: string, payload: SecretPayload) => {
-      puts.push(payload);
-      secrets.set(name, structuredClone(payload));
-    },
-  }),
-}));
+import { puts, secrets } from '../test-aws';
 
 const { upCommand } = await import('./up');
 const { downCommand } = await import('./down');
