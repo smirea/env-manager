@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ['master']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bun:
+    name: ${{ matrix.task }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [checks, tests, install]
+    env:
+      CI: 'true'
+      LEFTHOOK: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Checks
+        if: matrix.task == 'checks'
+        run: bun run lint:ci && bun run typecheck
+      - name: Tests
+        if: matrix.task == 'tests'
+        run: bun run test
+      - name: Global install
+        if: matrix.task == 'install'
+        run: |
+          bun pm pack --destination "$RUNNER_TEMP"
+          bun add -g "$RUNNER_TEMP"/env-manager-*.tgz
+          cd "$RUNNER_TEMP" && "$HOME/.bun/bin/env-manager" --help
