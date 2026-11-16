@@ -19,7 +19,7 @@
     },
     "type": "module",
     "bin": {
-        "env-manager": "./src/cli.ts"
+        "env-manager": "src/cli.ts"
     },
     "files": [
         "src",
