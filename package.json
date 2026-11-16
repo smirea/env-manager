@@ -1,6 +1,6 @@
 {
     "name": "@stefan.inc/env-manager",
-    "version": "0.0.0",
+    "version": "1.0.0",
     "description": "Keep environment schemas in one .env, generate local values and typed readers, and sync them with AWS Secrets Manager.",
     "keywords": [
         "aws",
