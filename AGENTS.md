@@ -1,13 +1,19 @@
-# Distribution
+# Releases
 
-env-manager ships the way sync-engine does: straight from GitHub, no registry. The package publishes its TypeScript source (`files` in `package.json`, test files excluded) and Bun runs `src/cli.ts` directly.
+env-manager is published to npm as `@stefan.inc/env-manager`. It ships its TypeScript source with no build step: `files` publishes `src` without the tests, beside the README and `LICENSE`, and Bun runs `src/cli.ts` directly. `src/package.test.ts` fails when the tarball holds anything else.
 
-- Projects depend on it as `"env-manager": "github:smirea/env-manager"`; the lockfile pins the commit.
-- Global install: `bun add -g github:smirea/env-manager` exposes `env-manager` on PATH.
-- Runtime imports belong in `dependencies`; tooling and types in `devDependencies`, which consumers never install. CI's `install` job packs the package, installs it globally and runs `env-manager --help`, so a missing runtime dependency fails there.
+- Install globally with `bun add -g @stefan.inc/env-manager`, which puts `env-manager` on PATH. Projects add it with `bun add -d @stefan.inc/env-manager`.
+- Runtime imports belong in `dependencies`; tooling and types in `devDependencies`, which installs never fetch. CI's `install` job packs the package, installs it globally and runs `env-manager --help`, so a missing runtime dependency fails there.
+- Every push to `master` whose CI passes runs `.github/workflows/release.yml`. Its `.github/scripts/release.ts` stops when `master` moved past the commit CI tested, turns pending changesets into a version and a `CHANGELOG.md` entry, publishes with `npm publish` unless npm already has that version, then commits the version to `master` as `github-actions[bot]`. Publishing before pushing lets a rerun converge. A push made with the workflow's token starts no CI run, so a release never triggers another.
+- npm trusts `release.yml` by file name through trusted publishing, so no token is stored anywhere and every version carries provenance. Renaming the workflow breaks publishing until the trusted publisher on npmjs.com names the new file.
+- A change to `src` (tests aside) or `package.json` adds a changeset in the same change: `.changeset/<short-name>.md`, with `'@stefan.inc/env-manager': patch`, `minor`, or `major` as its front matter and a sentence or two for the changelog, written for someone upgrading. The pull request check and the pre-push hook fail without one. A change that should not release takes `bunx changeset add --empty`.
+- Pick the level by what a project that upgrades without editing anything sees:
+  - `patch`: a bug fix, or a change with no new surface.
+  - `minor`: anything new that leaves existing projects working, such as a new command, flag or directive.
+  - `major`: only a change that breaks such a project, such as a removed or renamed command or flag, a changed `.env` directive, a generated reader whose shape changed, or a different AWS secret layout.
+- Before you write a `major` changeset, ask the maintainer to confirm it, unless they asked for a major release in this task.
+- Changesets that land on `master` together release as one version, at the highest level among them.
 
-# Workflow
+# Consumers
 
-- A merge here is not done until its consumers pin it. After every push to `master` that changes shipped code, move the pin in each repo that depends on it: `bun update env-manager` there (or rewrite a `#<sha>` pin to the new commit), run its `env:generate` script, and commit straight to its `master`. Find them with `grep -l smirea/env-manager ~/code/*/package.json`. A change that breaks the `.env` directives, generated reader shape or AWS layout goes through a PR in the consumer instead.
-- Refresh the global install too: `bun add -g github:smirea/env-manager`.
-- Docs-only changes need no bump.
+Projects under `~/code` depend on env-manager; find them with `grep -l env-manager ~/code/*/package.json`. After a release, bump each one with `bun update @stefan.inc/env-manager`, run its `env:generate` script, and commit straight to its `master` with its hooks run. A `major` release goes through a PR in the consumer with the migration it needs.

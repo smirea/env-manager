@@ -9,3 +9,9 @@ pre-commit:
       run: bunx --bun tsgo --noEmit
     test:
       run: bun test --pass-with-no-tests
+
+pre-push:
+  commands:
+    # A push to master releases what its changesets name, so a package change without one is never published.
+    changeset:
+      run: bunx changeset status --since=origin/master

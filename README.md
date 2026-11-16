@@ -8,13 +8,13 @@ and optionally sync with AWS Secrets Manager.
 Requires [Bun](https://bun.sh). Install the CLI globally:
 
 ```bash
-bun add -g github:smirea/env-manager
+bun add -g @stefan.inc/env-manager
 ```
 
-Or add it to a project, which pins the commit in `bun.lock`:
+Or add it to a project:
 
 ```bash
-bun add -d github:smirea/env-manager
+bun add -d @stefan.inc/env-manager
 ```
 
 For local development, `bun install && bun link` in this repo.
