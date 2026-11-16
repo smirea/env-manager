@@ -3,6 +3,7 @@ import {
   mkdtemp,
   mkdir,
   realpath,
+  rm,
   symlink,
   unlink,
   writeFile,
@@ -18,7 +19,7 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     return await fn(dir);
   } finally {
     await unlink(path.join(dir, 'entry-link.ts')).catch(() => undefined);
-    await Bun.$`trash ${dir}`.quiet();
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
