@@ -62,4 +62,4 @@ jobs:
         run: |
           bun pm pack --destination "$RUNNER_TEMP"
           bun add -g "$RUNNER_TEMP"/stefan.inc-env-manager-*.tgz
-          cd "$RUNNER_TEMP" && "$HOME/.bun/bin/env-manager" --help
+          cd "$RUNNER_TEMP" && env-manager --help

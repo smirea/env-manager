@@ -16,4 +16,4 @@ env-manager is published to npm as `@stefan.inc/env-manager`. It ships its TypeS
 
 # Consumers
 
-Projects under `~/code` depend on env-manager; find them with `grep -l env-manager ~/code/*/package.json`. After a release, bump each one with `bun update @stefan.inc/env-manager`, run its `env:generate` script, and commit straight to its `master` with its hooks run. A `major` release goes through a PR in the consumer with the migration it needs.
+env-manager is a global tool, never a project dependency: projects call `env-manager` from PATH, and their CI installs it first with `bun add -g @stefan.inc/env-manager@^1` before `bun run env:generate`. A `major` release means bumping that range in each project's workflows, with whatever migration it needs; find them with `grep -rl "@stefan.inc/env-manager" ~/code/*/.github/workflows`.
