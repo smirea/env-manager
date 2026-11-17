@@ -131,7 +131,7 @@ const env = z.object({
   DEBUG: z.stringbool().optional(),
   CALLBACK: z.url(),
   ADMIN: z.email().optional(),
-}).parse(process.env);
+}).parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
 
 export default env;
 ```

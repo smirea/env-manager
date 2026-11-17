@@ -579,10 +579,15 @@ const env = z.object({
   DATABASE_URL: z.url(),
   PORT: z.coerce.number().int().min(1000).max(65535),
   DEBUG: z.stringbool().optional(),
-}).parse(process.env);
+}).parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
 
 export default env;
 ```
+
+An empty value counts as unset, so a required variable fails with its name when
+it is missing or blank, and an optional one reads as `undefined`. Commit the
+reader: it is what validates the environment wherever the code runs, including
+CI, where no values file exists.
 
 ### 5. Sync with AWS
 
