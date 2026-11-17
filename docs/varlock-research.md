@@ -14,16 +14,16 @@ The distinction matters: **env-spec defines syntax; Varlock defines what the dec
 
 The inventory found 21 marked repos, including env-manager itself. This is a local checkout sample, not an exhaustive inventory of deployed projects. Values were omitted from the inventory output.
 
-| Repo | Observed usage | Migration consequence |
-| --- | --- | --- |
-| nudge, agent-manager | Root schema; generated `packages/shared/src/env.ts`; server/UI scripts explicitly load `../../.env` and `../../.env.local`. Agent-manager adds Electron scripts and booleans. | Changing comments is cheap. Renaming the file or changing loading requires script changes across packages. |
-| vitals | Server Zod module, Bun `--env-file`, shell `source .env`, Vite `loadEnv`, Expo public variables. | Several loaders must agree. Some client variables have no schema annotations today. |
-| read-to-me | `GOOGLE_APPLICATION_CREDENTIALS` has `{file}`; the app expects a credential-file path. | Must preserve file restoration, not replace a path with file contents. |
-| home-mac, mac-appbar | GitHub/App Store credentials use `{file}`. | Same file-sync requirement. |
-| memeforge | Explicit Swift output to `Config/LocalSecrets.xcconfig`; Xcode checks that file and instructs users to run `env-manager down`. | Keep the xcconfig writer. Injecting process env into a CLI does not replace this build configuration. |
-| research-austin | GitHub Actions directly reads AWS secret `env-manager/research-austin`, then `.environments.local.values`. | Preserve remote payload structure even if the schema syntax changes. |
-| scripts | Many optional strings, regex validation, URL types, generated Zod. | Useful pilot for optionality and validation behavior. |
-| botopia, new-you-times | Some or all defaults lack annotations. | Current parser excludes these from validation/codegen. Varlock includes and infers them. |
+| Repo                   | Observed usage                                                                                                                                                                | Migration consequence                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| nudge, agent-manager   | Root schema; generated `packages/shared/src/env.ts`; server/UI scripts explicitly load `../../.env` and `../../.env.local`. Agent-manager adds Electron scripts and booleans. | Changing comments is cheap. Renaming the file or changing loading requires script changes across packages. |
+| vitals                 | Server Zod module, Bun `--env-file`, shell `source .env`, Vite `loadEnv`, Expo public variables.                                                                              | Several loaders must agree. Some client variables have no schema annotations today.                        |
+| read-to-me             | `GOOGLE_APPLICATION_CREDENTIALS` has `{file}`; the app expects a credential-file path.                                                                                        | Must preserve file restoration, not replace a path with file contents.                                     |
+| home-mac, mac-appbar   | GitHub/App Store credentials use `{file}`.                                                                                                                                    | Same file-sync requirement.                                                                                |
+| memeforge              | Explicit Swift output to `Config/LocalSecrets.xcconfig`; Xcode checks that file and instructs users to run `env-manager down`.                                                | Keep the xcconfig writer. Injecting process env into a CLI does not replace this build configuration.      |
+| research-austin        | GitHub Actions directly reads AWS secret `env-manager/research-austin`, then `.environments.local.values`.                                                                    | Preserve remote payload structure even if the schema syntax changes.                                       |
+| scripts                | Many optional strings, regex validation, URL types, generated Zod.                                                                                                            | Useful pilot for optionality and validation behavior.                                                      |
+| botopia, new-you-times | Some or all defaults lack annotations.                                                                                                                                        | Current parser excludes these from validation/codegen. Varlock includes and infers them.                   |
 
 Additional coupling lives outside the app being migrated. `home-mac/src/setupRepoContainer.ts` detects `.env` before invoking env-manager and combines `.env` plus `.env.local` into deployment values. `home-mac/src/github.ts` also detects the `.env` filename and env-manager marker. Vitals launches scripts from the scripts repo with explicit `.env` paths. The starter template in `stefan-utils/scripts/setup-new-app/files/svelte` also contains env-manager conventions.
 
@@ -33,16 +33,16 @@ A filename migration must update those consumers, not just env-manager.
 
 Most annotations have an obvious syntactic equivalent:
 
-| Current | Varlock-style equivalent | Caveat |
-| --- | --- | --- |
-| `{string}` | `@type=string` | Declare requiredness explicitly or through the header. |
-| `{string:format(/^sk-/)}` | `@type=string(matches=/^sk-/)` | `startsWith=sk-` also expresses this particular prefix check. |
-| `{int:min(1),max(65535)}` | `@type=number(isInt=true,min=1,max=65535)` | Not equivalent validation; see the runtime probe below. |
-| `{float:min(0)}` | `@type=number(min=0)` | Numeric coercion needs compatibility checks. |
-| `{bool}` | `@type=boolean` | Accepted input spellings differ. |
-| `{url}`, `{email}` | `@type=url`, `@type=email` | Check edge cases against our validator and generated Zod. |
-| `{optional string}` | `@optional @type=string` | Keep optionality explicit. |
-| `{file}` | `@type=string` plus env-manager file metadata | There is no equivalent built-in sync-and-restore type. |
+| Current                   | Varlock-style equivalent                      | Caveat                                                        |
+| ------------------------- | --------------------------------------------- | ------------------------------------------------------------- |
+| `{string}`                | `@type=string`                                | Declare requiredness explicitly or through the header.        |
+| `{string:format(/^sk-/)}` | `@type=string(matches=/^sk-/)`                | `startsWith=sk-` also expresses this particular prefix check. |
+| `{int:min(1),max(65535)}` | `@type=number(isInt=true,min=1,max=65535)`    | Not equivalent validation; see the runtime probe below.       |
+| `{float:min(0)}`          | `@type=number(min=0)`                         | Numeric coercion needs compatibility checks.                  |
+| `{bool}`                  | `@type=boolean`                               | Accepted input spellings differ.                              |
+| `{url}`, `{email}`        | `@type=url`, `@type=email`                    | Check edge cases against our validator and generated Zod.     |
+| `{optional string}`       | `@optional @type=string`                      | Keep optionality explicit.                                    |
+| `{file}`                  | `@type=string` plus env-manager file metadata | There is no equivalent built-in sync-and-restore type.        |
 
 Varlock adds enums, richer string constraints, arrays, documentation links, and sensitivity metadata. [Data types](https://varlock.dev/reference/data-types/).
 
@@ -73,13 +73,13 @@ Explicit root defaults avoid inheriting Varlock init's `@defaultRequired=infer`,
 
 Installed the published packages outside the repo with install scripts disabled and ran `varlock load --format json` against synthetic fixtures. Compared relevant cases against our actual `parseEnvFile` and `validateEnv` functions.
 
-| Case | Current env-manager | Varlock 1.19.0 |
-| --- | --- | --- |
-| Integer input `3.7` | Rejects it | `number(isInt=true)` returns `4` |
-| Boolean input `t` | Rejects it | Returns `true` |
-| Schema `KEY=default`, values file `KEY=` | Required-variable error | Keeps `default` |
-| Unknown `@envManagerFile` decorator | Not applicable | Fails with unknown-decorator error |
-| `@setValuesBulk("KEY=example", format=env)` | Not supported | Loads `KEY=example` |
+| Case                                        | Current env-manager     | Varlock 1.19.0                     |
+| ------------------------------------------- | ----------------------- | ---------------------------------- |
+| Integer input `3.7`                         | Rejects it              | `number(isInt=true)` returns `4`   |
+| Boolean input `t`                           | Rejects it              | Returns `true`                     |
+| Schema `KEY=default`, values file `KEY=`    | Required-variable error | Keeps `default`                    |
+| Unknown `@envManagerFile` decorator         | Not applicable          | Fails with unknown-decorator error |
+| `@setValuesBulk("KEY=example", format=env)` | Not supported           | Loads `KEY=example`                |
 
 The parser successfully reads regular env-manager header comments and supports updating decorators. Its serializer removed the trailing newline in the probe, so schema versioning and round-trip writes need deliberate normalization.
 
@@ -93,11 +93,11 @@ Other compatibility traps:
 
 ## Three implementation choices
 
-| Choice | Work in env-manager | Extra work per repo | What we gain |
-| --- | --- | --- | --- |
-| Static schema adapter | Parse env-spec; map supported annotations to our schema model; update writers and converter. | Convert comments. Existing loaders and imports can stay. | Better schema notation, metadata, access to syntax tooling. Still own validation/codegen. |
+| Choice                                                         | Work in env-manager                                                                                             | Extra work per repo                                                                        | What we gain                                                                                 |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Static schema adapter                                          | Parse env-spec; map supported annotations to our schema model; update writers and converter.                    | Convert comments. Existing loaders and imports can stay.                                   | Better schema notation, metadata, access to syntax tooling. Still own validation/codegen.    |
 | Full Varlock validation/resolution during env-manager commands | Load/resolve with Varlock, preserve our sync/output adapters, decide how runtime validation remains consistent. | Limited if output stays plain dotenv/xcconfig; more if new types change generated modules. | Richer schema behavior at sync time. Imports/functions require dependency and storage rules. |
-| Varlock at application startup | Retain or replace AWS sync; wire Varlock into apps and builds. | Update startup commands, Bun config, framework integration and CI. | Live resolution, Varlock types and applicable runtime protections. |
+| Varlock at application startup                                 | Retain or replace AWS sync; wire Varlock into apps and builds.                                                  | Update startup commands, Bun config, framework integration and CI.                         | Live resolution, Varlock types and applicable runtime protections.                           |
 
 The published Varlock root API exposes `load()`, but the configurable `loadEnvGraph` entry point sits under `internal`. An embedded integration should pin its version and test that boundary. The CLI's JSON output is another option, with subprocess and environment-isolation costs. Neither warrants calling the integration a drop-in parser replacement.
 

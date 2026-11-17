@@ -68,31 +68,31 @@ env-manager generate
 
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `init` | Create `.env` from AWS or new template and copy matching global defaults |
-| `up` | Upload `.env` schema and configured values for the current environment to AWS |
-| `down [--env <name>]` | Download `.env` and configured values for the current (or given) environment from AWS |
-| `rm [project]` | Delete the project secret from AWS without touching local files |
-| `generate [path]` (`gen`) | Generate local values files and TypeScript readers; all targets by default |
-| `ts [path]` | Deprecated alias for `generate`; still accepts the same options |
-| `list` (`ls`) | List all projects in `env-manager/*` namespace and global keys |
-| `print [project]` | Print all stored environments for a project |
-| `print [project] -e <env>` | Print one stored environment for a project |
-| `set <field> <value>` | Set `.env` config: `local`, `format`, `path`, or `generate` |
-| `check [--strict]` | Validate root config and output paths without changing files |
-| `info` | Print the project setup as JSON for scripts; exits 3 when there is no setup |
-| `format` | Normalize spacing while preserving comments, values, variable order, and target scopes |
-| `env set <env>` | Select an environment and download it, or seed a new one |
-| `env list` (`env ls`) | List environments for a project |
-| `env rm <env>` | Remove an environment from AWS |
-| `sync github <env> [--only A,B] [--repo owner/name] [--dry-run]` | Set the repository's GitHub Actions secrets from a stored environment |
-| `global set` | Set a global default env var |
-| `global get [NAME]` | Get a global default env var |
-| `global list` (`global ls`) | List all global default env vars |
-| `global rm <NAME>` | Remove a global default env var |
-| `new-key <KEY>` | Create and add API key (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) |
-| `new-key --list` | List available keys |
+| Command                                                          | Description                                                                            |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `init`                                                           | Create `.env` from AWS or new template and copy matching global defaults               |
+| `up`                                                             | Upload `.env` schema and configured values for the current environment to AWS          |
+| `down [--env <name>]`                                            | Download `.env` and configured values for the current (or given) environment from AWS  |
+| `rm [project]`                                                   | Delete the project secret from AWS without touching local files                        |
+| `generate [path]` (`gen`)                                        | Generate local values files and TypeScript readers; all targets by default             |
+| `ts [path]`                                                      | Deprecated alias for `generate`; still accepts the same options                        |
+| `list` (`ls`)                                                    | List all projects in `env-manager/*` namespace and global keys                         |
+| `print [project]`                                                | Print all stored environments for a project                                            |
+| `print [project] -e <env>`                                       | Print one stored environment for a project                                             |
+| `set <field> <value>`                                            | Set `.env` config: `local`, `format`, `path`, or `generate`                            |
+| `check [--strict]`                                               | Validate root config and output paths without changing files                           |
+| `info`                                                           | Print the project setup as JSON for scripts; exits 3 when there is no setup            |
+| `format`                                                         | Normalize spacing while preserving comments, values, variable order, and target scopes |
+| `env set <env>`                                                  | Select an environment and download it, or seed a new one                               |
+| `env list` (`env ls`)                                            | List environments for a project                                                        |
+| `env rm <env>`                                                   | Remove an environment from AWS                                                         |
+| `sync github <env> [--only A,B] [--repo owner/name] [--dry-run]` | Set the repository's GitHub Actions secrets from a stored environment                  |
+| `global set`                                                     | Set a global default env var                                                           |
+| `global get [NAME]`                                              | Get a global default env var                                                           |
+| `global list` (`global ls`)                                      | List all global default env vars                                                       |
+| `global rm <NAME>`                                               | Remove a global default env var                                                        |
+| `new-key <KEY>`                                                  | Create and add API key (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`)               |
+| `new-key --list`                                                 | List available keys                                                                    |
 
 ### Project lookup
 
@@ -126,26 +126,26 @@ The persistent `# env-manager local:true` setting also disables all Git updates.
 
 ### Options
 
-| Option | Description |
-|--------|-------------|
-| `-p, --project <name>` | Project name (default: `.env` header, then the project directory name) |
-| `--local` / `--no-local` | Override project local mode for this invocation |
-| `--target <name>` | Generate only one declared target (`generate` and aliases) |
-| `--env <name>` | Render target values from a stored environment without selecting it (`generate` only) |
-| `--strict` | Require type annotations in legacy files too (`check`) |
-| `-f, --force` | Replace the stored TypeScript output path (`generate` only, including aliases) |
-| `-y, --yes` | Accept defaults for prompts (non-interactive) |
-| `--values-format <ts\|swift>` | Values output format (`init` only) |
-| `--values-path <path>` | Values output path (`init` only; otherwise the format default) |
-| `-e, --env <name>` | Print only one environment (`print` only) |
-| `--only <names>` | Sync only these variables, comma-separated or repeated (`sync github` only) |
-| `--repo <owner/name>` | Repository to write to (`sync github` only; default: the one `gh` resolves for the directory) |
-| `--dry-run` | Name the secrets that would be set without setting them (`sync github` only) |
-| `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
-| `--credit <usd>` | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`) |
-| `--unlimited` | Create OpenRouter key without a credit limit (`new-key OPENROUTER_API_KEY` only) |
-| `--expiration <utc-iso>` | OpenRouter key expiration (UTC ISO-8601, `new-key OPENROUTER_API_KEY` only) |
-| `-h, --help` | Show help message |
+| Option                        | Description                                                                                   |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
+| `-p, --project <name>`        | Project name (default: `.env` header, then the project directory name)                        |
+| `--local` / `--no-local`      | Override project local mode for this invocation                                               |
+| `--target <name>`             | Generate only one declared target (`generate` and aliases)                                    |
+| `--env <name>`                | Render target values from a stored environment without selecting it (`generate` only)         |
+| `--strict`                    | Require type annotations in legacy files too (`check`)                                        |
+| `-f, --force`                 | Replace the stored TypeScript output path (`generate` only, including aliases)                |
+| `-y, --yes`                   | Accept defaults for prompts (non-interactive)                                                 |
+| `--values-format <ts\|swift>` | Values output format (`init` only)                                                            |
+| `--values-path <path>`        | Values output path (`init` only; otherwise the format default)                                |
+| `-e, --env <name>`            | Print only one environment (`print` only)                                                     |
+| `--only <names>`              | Sync only these variables, comma-separated or repeated (`sync github` only)                   |
+| `--repo <owner/name>`         | Repository to write to (`sync github` only; default: the one `gh` resolves for the directory) |
+| `--dry-run`                   | Name the secrets that would be set without setting them (`sync github` only)                  |
+| `--name <name>`               | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name)                |
+| `--credit <usd>`              | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`)   |
+| `--unlimited`                 | Create OpenRouter key without a credit limit (`new-key OPENROUTER_API_KEY` only)              |
+| `--expiration <utc-iso>`      | OpenRouter key expiration (UTC ISO-8601, `new-key OPENROUTER_API_KEY` only)                   |
+| `-h, --help`                  | Show help message                                                                             |
 
 ### Local mode
 
@@ -203,10 +203,10 @@ broadcasts.
 
 Target fields:
 
-| Field | Meaning |
-|-------|---------|
-| `format=ts\|swift` | Required output format |
-| `path=<relative-file>` | Values file, default `.env.local` for TS or `Config/LocalSecrets.xcconfig` for Swift |
+| Field                      | Meaning                                                                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format=ts\|swift`         | Required output format                                                                                                                             |
+| `path=<relative-file>`     | Values file, default `.env.local` for TS or `Config/LocalSecrets.xcconfig` for Swift                                                               |
 | `generate=<relative-file>` | The committed file that validates the environment: a TypeScript reader, default `src/env.ts`, or for Swift a check script, written only when named |
 
 Paths are relative to the target directory. For example:
@@ -344,15 +344,15 @@ RATE_LIMIT=0.5
 
 ### Supported Types
 
-| Type | Validators | Example |
-|------|-----------|---------|
-| `string` | `format(regex)` | `# {string:format(/^sk-/)}` |
-| `int` | `min(n)`, `max(n)` | `# {int:min(0),max(100)}` |
-| `float` | `min(n)`, `max(n)` | `# {float:min(0.0)}` |
-| `bool` | - | `# {bool}` |
-| `url` | - | `# {url}` |
-| `email` | - | `# {email}` |
-| `file` | - | `# {file}` |
+| Type     | Validators         | Example                     |
+| -------- | ------------------ | --------------------------- |
+| `string` | `format(regex)`    | `# {string:format(/^sk-/)}` |
+| `int`    | `min(n)`, `max(n)` | `# {int:min(0),max(100)}`   |
+| `float`  | `min(n)`, `max(n)` | `# {float:min(0.0)}`        |
+| `bool`   | -                  | `# {bool}`                  |
+| `url`    | -                  | `# {url}`                   |
+| `email`  | -                  | `# {email}`                 |
+| `file`   | -                  | `# {file}`                  |
 
 All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
@@ -518,6 +518,7 @@ env-manager new-key OPENROUTER_API_KEY --name my-app --credit 25 --expiration 20
 ```
 
 If the key exists in global defaults, you'll be prompted:
+
 ```
 ANTHROPIC_API_KEY found in global defaults
   [1] Use existing from global defaults
@@ -526,16 +527,19 @@ Choice:
 ```
 
 When creating a new `OPENROUTER_API_KEY`, you'll also be prompted for monthly credit limit:
+
 ```
 OpenRouter monthly credit limit in USD (default 10; type "unlimited" for no limit):
 ```
 
 To run non-interactively and use the default choice:
+
 ```bash
 env-manager new-key ANTHROPIC_API_KEY --yes
 ```
 
 For OpenRouter, you can set the limit explicitly:
+
 ```bash
 env-manager new-key OPENROUTER_API_KEY --credit 25
 env-manager new-key OPENROUTER_API_KEY --unlimited
@@ -567,6 +571,7 @@ re-syncs the configured values file with any global defaults that share a schema
 entry.
 
 If global defaults contains keys, you'll be prompted to copy them:
+
 ```
 Found 1 key(s) in global defaults:
   - ANTHROPIC_API_KEY
@@ -575,6 +580,7 @@ Use ANTHROPIC_API_KEY from global defaults? (Y/n):
 ```
 
 To copy all defaults without prompts:
+
 ```bash
 env-manager init --yes
 ```
@@ -643,11 +649,13 @@ Generates `src/env.ts`:
 // AUTO-GENERATED by env-manager - do not edit
 import { z } from 'zod';
 
-const env = z.object({
-  DATABASE_URL: z.url(),
-  PORT: z.coerce.number().int().min(1000).max(65535),
-  DEBUG: z.stringbool().optional(),
-}).parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
+const env = z
+	.object({
+		DATABASE_URL: z.url(),
+		PORT: z.coerce.number().int().min(1000).max(65535),
+		DEBUG: z.stringbool().optional(),
+	})
+	.parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
 
 export default env;
 ```
@@ -695,13 +703,13 @@ environment. Existing single-environment secrets are treated as `local`.
 
 ## File Structure
 
-| File | Purpose |
-|------|---------|
-| `.env` | Schema, defaults, and env-manager config (committed to git) |
-| `.env.local` | Default `ts` values file and non-`ts` environment selector |
-| `.env.override` | Checkout-local overrides applied to target child outputs (git-ignored) |
-| `Config/LocalSecrets.xcconfig` | Common Swift/Xcode values file |
-| `src/env.ts` | Generated typed env access for `ts` mode |
+| File                           | Purpose                                                                |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `.env`                         | Schema, defaults, and env-manager config (committed to git)            |
+| `.env.local`                   | Default `ts` values file and non-`ts` environment selector             |
+| `.env.override`                | Checkout-local overrides applied to target child outputs (git-ignored) |
+| `Config/LocalSecrets.xcconfig` | Common Swift/Xcode values file                                         |
+| `src/env.ts`                   | Generated typed env access for `ts` mode                               |
 
 ## License
 

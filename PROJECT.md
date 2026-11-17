@@ -6,48 +6,48 @@ utility to manage my own environment variables for all my personal projects
 
 1. define environment schema per project
 
-    schema + defaults are embedded as comments in the `.env` file. format: `# {optional?, type:validators?}`. example:
+   schema + defaults are embedded as comments in the `.env` file. format: `# {optional?, type:validators?}`. example:
 
-    ```
-    # env-manager: project-name
+   ```
+   # env-manager: project-name
 
-    FOO= # {optional float}
-    # {string}
-    BAR='some default value'
-    API_KEY= # {string:format(/^openai-key_\w+/)}
-    PORT=3000 # {int:min(3000),max(10000)}
-    DEBUG= # {optional bool}
-    CALLBACK= # {url}
-    ADMIN= # {optional email}
-    ```
+   FOO= # {optional float}
+   # {string}
+   BAR='some default value'
+   API_KEY= # {string:format(/^openai-key_\w+/)}
+   PORT=3000 # {int:min(3000),max(10000)}
+   DEBUG= # {optional bool}
+   CALLBACK= # {url}
+   ADMIN= # {optional email}
+   ```
 
 2. store projects in aws secrets manager (both schema and data) in namespace `env-manager/<project>`
 
-    single-project values output uses optional `# env-manager format: ts|swift`, `# env-manager path: <path>`, and `# env-manager generate: <reader path>`. TS defaults are `.env.local` and `src/env.ts` with `package.json`; Swift values default to `Config/LocalSecrets.xcconfig`. Legacy `values.format`, `values.path`, and `ts` metadata are still readable but cannot be duplicated with new names.
+   single-project values output uses optional `# env-manager format: ts|swift`, `# env-manager path: <path>`, and `# env-manager generate: <reader path>`. TS defaults are `.env.local` and `src/env.ts` with `package.json`; Swift values default to `Config/LocalSecrets.xcconfig`. Legacy `values.format`, `values.path`, and `ts` metadata are still readable but cannot be duplicated with new names.
 
 3. cli script
 
-    3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and configured values. Skips the AWS write when nothing changed. defaults project to the `.env` header, then basename of cwd
+   3.1. `env-manager up [-p --project=<name>]` - uploads `.env` schema and configured values. Skips the AWS write when nothing changed. defaults project to the `.env` header, then basename of cwd
 
-    3.2. `env-manager down [-p --project=<name>] [--env <name>]` - syncs `.env` and configured values from aws; with no recorded environment it requires `--env` unless only one exists; the values file is rewritten only when its values differ or its version is behind
+   3.2. `env-manager down [-p --project=<name>] [--env <name>]` - syncs `.env` and configured values from aws; with no recorded environment it requires `--env` unless only one exists; the values file is rewritten only when its values differ or its version is behind
 
-    3.3. `env-manager generate [path]` - materializes local values and TS readers (default `src/env.ts`). Swift produces values, plus a `check-env.sh`-style script that validates build settings when `generate=` names one. `--target <name>` selects one monorepo target. Every values file and generated output has its own `| vN` header version, stored per environment in AWS and mirrored in the root values file; an output is rewritten only when its content drifts from the render, and one that matches keeps the version in its file (readers ignore whitespace, quotes, semicolons, commas, and parens; values files compare parsed values and metadata lines), so formatter-only edits survive while hand edits and children from another environment heal; versions are per environment, so a version alone never proves a child current. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
+   3.3. `env-manager generate [path]` - materializes local values and TS readers (default `src/env.ts`). Swift produces values, plus a `check-env.sh`-style script that validates build settings when `generate=` names one. `--target <name>` selects one monorepo target. Every values file and generated output has its own `| vN` header version, stored per environment in AWS and mirrored in the root values file; an output is rewritten only when its content drifts from the render, and one that matches keeps the version in its file (readers ignore whitespace, quotes, semicolons, commas, and parens; values files compare parsed values and metadata lines), so formatter-only edits survive while hand edits and children from another environment heal; versions are per environment, so a version alone never proves a child current. Alias: `gen`; deprecated `ts` forwards to `generate` with a warning. `--local` skips automatic Git updates
 
-    3.4. `env-manager init [-p --project=<name>] [--values-format ts|swift --values-path <path>]` - creates `.env` from aws if project exists, otherwise creates empty template with header. `--local` skips AWS credentials, remote project lookup, global defaults, and automatic Git updates
+   3.4. `env-manager init [-p --project=<name>] [--values-format ts|swift --values-path <path>]` - creates `.env` from aws if project exists, otherwise creates empty template with header. `--local` skips AWS credentials, remote project lookup, global defaults, and automatic Git updates
 
-    3.5. `env-manager list` - lists all projects in `env-manager/*` namespace
+   3.5. `env-manager list` - lists all projects in `env-manager/*` namespace
 
-    3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to configured values, syncs to AWS. auto-adds schema entry if missing.
+   3.6. `env-manager new-key <provider> [env_name]` - creates API key via provider, adds to configured values, syncs to AWS. auto-adds schema entry if missing.
 
-    3.8. `env-manager sync github <env> [--only A,B] [--repo owner/name] [--dry-run]` - reads a stored environment from AWS and sets each variable that has a value as a GitHub Actions repository secret through `gh secret set`, with the value on stdin. `file` variables send the stored file contents. Without `--only`, unset variables and names GitHub reserves (`GITHUB_*`) are skipped and listed; with it, an unknown, unset, or reserved name fails before anything is set. Never prints a value.
+   3.8. `env-manager sync github <env> [--only A,B] [--repo owner/name] [--dry-run]` - reads a stored environment from AWS and sets each variable that has a value as a GitHub Actions repository secret through `gh secret set`, with the value on stdin. `file` variables send the stored file contents. Without `--only`, unset variables and names GitHub reserves (`GITHUB_*`) are skipped and listed; with it, an unknown, unset, or reserved name fails before anything is set. Never prints a value.
 
-    3.7. `env-manager set <field> <value>` - sets `.env` config fields like `values.format` and `values.path`
+   3.7. `env-manager set <field> <value>` - sets `.env` config fields like `values.format` and `values.path`
 
-    `# env-manager local:true` persists local mode. Explicit `--local`/`--no-local` overrides it for one invocation; `init --local` persists it. Local mode skips all AWS and Git updates. Storage commands fail before credentials; `--no-local` permits them. `set local true|false`, `check`, `format`, and `env set` work locally. Outside local mode `env set <env>` downloads an existing environment like `down`, or keeps the current values to seed a new one on `up`; locally it only moves the selector and warns. The values file records `# env-manager values env: <env>` (where its values were loaded from or seeded for), and `up` refuses to upload when it differs from the selected env. The stored `# env-manager ts: <path>` remains compatible.
+   `# env-manager local:true` persists local mode. Explicit `--local`/`--no-local` overrides it for one invocation; `init --local` persists it. Local mode skips all AWS and Git updates. Storage commands fail before credentials; `--no-local` permits them. `set local true|false`, `check`, `format`, and `env set` work locally. Outside local mode `env set <env>` downloads an existing environment like `down`, or keeps the current values to seed a new one on `up`; locally it only moves the selector and warns. The values file records `# env-manager values env: <env>` (where its values were loaded from or seeded for), and `up` refuses to upload when it differs from the selected env. The stored `# env-manager ts: <path>` remains compatible.
 
-    flags:
-    - `-p, --project <name>`: project name (defaults to `.env` header, then cwd basename)
-    - `-y, --yes`: accept defaults for prompts (non-interactive)
+   flags:
+   - `-p, --project <name>`: project name (defaults to `.env` header, then cwd basename)
+   - `-y, --yes`: accept defaults for prompts (non-interactive)
 
 ## Root configuration and targets
 
@@ -83,11 +83,12 @@ or touching .env, root values, readers, version records, or overrides.
 
 Providers automate API key creation via browser automation (`claude --chrome`).
 
-| Provider | Default Env Name | Key Format |
-|----------|-----------------|------------|
+| Provider | Default Env Name    | Key Format |
+| -------- | ------------------- | ---------- |
 | `claude` | `ANTHROPIC_API_KEY` | `sk-ant-*` |
 
 Usage:
+
 ```bash
 env-manager new-key claude              # uses ANTHROPIC_API_KEY
 env-manager new-key claude MY_API_KEY   # uses custom env name
@@ -95,14 +96,14 @@ env-manager new-key claude MY_API_KEY   # uses custom env name
 
 ## Schema Types
 
-| Type | Validators | Example |
-|------|-----------|---------|
-| `string` | `format(regex)` | `# {string:format(/^sk-/)}` |
-| `int` | `min(n)`, `max(n)` | `# {int:min(0),max(100)}` |
-| `float` | `min(n)`, `max(n)` | `# {float:min(0.0)}` |
-| `bool` | - | `# {bool}` |
-| `url` | - | `# {url}` |
-| `email` | - | `# {email}` |
+| Type     | Validators         | Example                     |
+| -------- | ------------------ | --------------------------- |
+| `string` | `format(regex)`    | `# {string:format(/^sk-/)}` |
+| `int`    | `min(n)`, `max(n)` | `# {int:min(0),max(100)}`   |
+| `float`  | `min(n)`, `max(n)` | `# {float:min(0.0)}`        |
+| `bool`   | -                  | `# {bool}`                  |
+| `url`    | -                  | `# {url}`                   |
+| `email`  | -                  | `# {email}`                 |
 
 All types can be prefixed with `optional` (e.g., `# {optional string}`).
 
@@ -125,15 +126,17 @@ All types can be prefixed with `optional` (e.g., `# {optional string}`).
 // src/env.ts - generated by env-manager
 import { z } from 'zod';
 
-const env = z.object({
-  FOO: z.coerce.number().optional(),
-  BAR: z.string(),
-  API_KEY: z.string().regex(/^openai-key_\w+/),
-  PORT: z.coerce.number().int().min(3000).max(10000),
-  DEBUG: z.stringbool().optional(),
-  CALLBACK: z.url(),
-  ADMIN: z.email().optional(),
-}).parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
+const env = z
+	.object({
+		FOO: z.coerce.number().optional(),
+		BAR: z.string(),
+		API_KEY: z.string().regex(/^openai-key_\w+/),
+		PORT: z.coerce.number().int().min(3000).max(10000),
+		DEBUG: z.stringbool().optional(),
+		CALLBACK: z.url(),
+		ADMIN: z.email().optional(),
+	})
+	.parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
 
 export default env;
 ```
