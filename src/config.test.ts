@@ -44,7 +44,6 @@ describe('root config validation', () => {
       ['# env-manager target: client format=ts\n# env-manager target: client format=ts', 'Duplicate target'],
       ['# env-manager target: client format=ts what=foo', 'Unknown or malformed target field'],
       ['# env-manager target: ../client format=ts', 'Invalid target'],
-      ['# env-manager target: ios format=swift generate=env.ts', 'only supported'],
       ['# env-manager format: ts\n# env-manager values.format: ts', 'conflicting'],
       ['# env-manager path: ../secrets', 'must be relative'],
       ['# env-manager generate: /tmp/env.ts', 'must be relative'],

@@ -4,7 +4,6 @@ import { ENV_NAME_PATTERN, formatLocalValue, formatSchemaComment, parseEnvValues
 interface Format {
   defaultPath: string;
   commentPrefix: CommentPrefix;
-  reader: boolean;
   holdsSelection: boolean;
   render(schema: EnvVarSchema[], values: EnvValues): string;
   parse(content: string): EnvValues;
@@ -55,7 +54,6 @@ export const FORMATS = {
   ts: {
     defaultPath: '.env.local',
     commentPrefix: '#',
-    reader: true,
     holdsSelection: true,
     render: renderTs,
     parse: parseEnvValues,
@@ -63,7 +61,6 @@ export const FORMATS = {
   swift: {
     defaultPath: 'Config/LocalSecrets.xcconfig',
     commentPrefix: '//',
-    reader: false,
     holdsSelection: false,
     render: renderSwift,
     parse: parseSwift,

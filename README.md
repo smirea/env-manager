@@ -207,7 +207,7 @@ Target fields:
 |-------|---------|
 | `format=ts\|swift` | Required output format |
 | `path=<relative-file>` | Values file, default `.env.local` for TS or `Config/LocalSecrets.xcconfig` for Swift |
-| `generate=<relative-file>` | TypeScript reader, default `src/env.ts`; invalid for Swift |
+| `generate=<relative-file>` | The committed file that validates the environment: a TypeScript reader, default `src/env.ts`, or for Swift a check script, written only when named |
 
 Paths are relative to the target directory. For example:
 
@@ -380,9 +380,27 @@ reading Swift values decodes that representation. This behavior is verified with
 Xcode build settings. [Apple xcconfig syntax](https://help.apple.com/xcode/mac/current/en.lproj/dev745c5c974.html)
 describes comment delimiters and setting expansion.
 
-`generate` produces a reader for TS and values only for Swift. A positional
-reader path is valid only with TS. Without config or `package.json`, configure a
-format before commands that read or write values.
+`generate` produces a reader for TS. For Swift it produces values, plus a check
+script when `generate` names one:
+
+```bash
+# env-manager target: app-ios format=swift generate=Config/check-env.sh
+```
+
+The script is the Swift counterpart of the reader. It exits non-zero, naming
+each variable, when a required setting is unset or a set one has the wrong
+type, range, or format, and it never prints a value. Commit it and run it as
+the first Run Script build phase of the Xcode target, where build settings
+arrive as environment variables, so a build or archive stops before compiling:
+
+```sh
+"$SRCROOT/Config/check-env.sh"
+```
+
+A `format(/.../)` pattern that `grep -E` cannot run (`\d`, `\w`, lookarounds,
+lazy quantifiers, flags other than `i`) is left unchecked and named in a comment
+in the script. Without config or `package.json`, configure a format before
+commands that read or write values.
 
 ## Environments
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateCommand } from './generate';
@@ -118,23 +118,70 @@ export default env;
     });
   });
 
-  test('rejects a reader path outside ts values mode', async () => {
+  test('a swift target with generate= commits a check script that fails on missing or malformed settings', async () => {
     await withTempDir(async (dir) => {
-      await writeFile(
-        path.join(dir, '.env'),
-        [
-          '# env-manager: test-project | 2025-01-01T00:00:00Z',
-          '# env-manager values.format: swift',
-          '# env-manager values.path: Config/LocalSecrets.xcconfig',
-          '',
-          'FOO=bar # {string}',
-          '',
-        ].join('\n')
-      );
+      await writeFile(path.join(dir, '.env'), [
+        '# env-manager: test-project',
+        '# env-manager target: ios format=swift generate=Config/check-env.sh',
+        '',
+        '# env-manager targets: ios',
+        'API_URL=http://127.0.0.1:3000 # {url}',
+        'OWNER_TOKEN= # {string:format(/^tok_/)}',
+        'PORT=3000 # {int:min(1),max(65535)}',
+        'SENTRY_ENVIRONMENT= # {optional string:format(/^(production|development)$/)}',
+        'BUILD_TAG= # {optional string:format(/^\\d+$/)}',
+        '',
+      ].join('\n'));
+      await generateCommand({ project: 'test-project', cwd: dir });
+      const script = path.join(dir, 'ios/Config/check-env.sh');
+      const content = await readFile(script, 'utf8');
+      expect(content.split('\n').slice(0, 4)).toEqual([
+        '#!/bin/sh',
+        '# env-manager: test-project | v1',
+        '# env-manager target: ios',
+        '# env-manager root: ../..',
+      ]);
+      expect(content).toContain('# BUILD_TAG: /^\\d+$/ is not checked here');
+      expect((await stat(script)).mode & 0o111).toBe(0o111);
 
-      await expect(
-        generateCommand({ project: 'test-project', cwd: dir }, 'env.ts')
-      ).rejects.toThrow('only works when values.format is "ts"');
+      const run = (env: Record<string, string>) => {
+        const result = Bun.spawnSync([script], { env: { PATH: process.env.PATH, ...env } });
+        return { code: result.exitCode, errors: result.stderr.toString().trim().split('\n').filter(Boolean) };
+      };
+      const good = { API_URL: 'https://example.com', OWNER_TOKEN: 'tok_secret', PORT: '8080' };
+      expect(run(good)).toEqual({ code: 0, errors: [] });
+      expect(run({ ...good, SENTRY_ENVIRONMENT: 'production' })).toEqual({ code: 0, errors: [] });
+      expect(run({ SENTRY_ENVIRONMENT: 'staging', API_URL: 'example.com', OWNER_TOKEN: 'hunter2', PORT: '70000' })).toEqual({
+        code: 1,
+        errors: [
+          'error: env-manager: API_URL is not a URL',
+          'error: env-manager: OWNER_TOKEN does not match ^tok_',
+          'error: env-manager: PORT is above 65535',
+          'error: env-manager: SENTRY_ENVIRONMENT does not match ^(production|development)$',
+        ],
+      });
+      expect(run({ PORT: 'abc' })).toEqual({
+        code: 1,
+        errors: [
+          'error: env-manager: API_URL is not set',
+          'error: env-manager: OWNER_TOKEN is not set',
+          'error: env-manager: PORT is not an integer',
+        ],
+      });
+
+      await generateCommand({ project: 'test-project', cwd: dir });
+      expect(await readFile(script, 'utf8')).toBe(content);
+    });
+  });
+
+  test('a single swift project generates the check script at the path it names', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager format: swift\n\nAPI_URL=https://example.com # {url}\n');
+      await generateCommand({ project: 'test-project', cwd: dir }, 'Config/check-env.sh');
+      expect(await readFile(path.join(dir, '.env'), 'utf8')).toContain('# env-manager generate: Config/check-env.sh');
+      const content = await readFile(path.join(dir, 'Config/check-env.sh'), 'utf8');
+      expect(content.split('\n').slice(0, 2)).toEqual(['#!/bin/sh', '# env-manager: test-project | v1']);
+      expect(content).toContain('check API_URL required url');
     });
   });
 

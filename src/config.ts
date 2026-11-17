@@ -3,6 +3,7 @@ import { configError } from './errors';
 import { FORMATS, isOutputFormat, OUTPUT_FORMATS, type OutputFormat } from './formats';
 import { formatDirective, formatHeader, isDirectiveLine, parseDirective, parseHeader, upsertDirective } from './metadata';
 import { formatSchemaComment, parseEnvFile, parseEnvLine, parseSchemaComment, type EnvVarSchema, type ParsedEnvFile } from './parser';
+import { READERS } from './readers';
 import { validateValue } from './validator';
 
 export type Target = {
@@ -22,8 +23,6 @@ export type RootConfig = ParsedEnvFile & {
   modern: boolean;
   metadata: Map<number, string>;
 };
-
-export const DEFAULT_READER_PATH = 'src/env.ts';
 
 const SETTINGS = {
   local: 'local',
@@ -93,9 +92,9 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
       }
       const format = options.get('format');
       if (!isOutputFormat(format)) configError(file, line, `Target "${name}" needs ${OUTPUT_FORMATS.map(f => `format=${f}`).join(' or ')}.`);
-      if (!FORMATS[format].reader && options.has('generate')) configError(file, line, 'generate is only supported for TypeScript targets.');
       const path = relativeOutput(options.get('path') ?? FORMATS[format].defaultPath, file, line);
-      const generate = FORMATS[format].reader ? relativeOutput(options.get('generate') ?? DEFAULT_READER_PATH, file, line) : undefined;
+      const readerPath = options.get('generate') ?? READERS[format].defaultPath;
+      const generate = readerPath === null ? undefined : relativeOutput(readerPath, file, line);
       targets.push({ name, format, path, generate, line });
       metadata.set(line, formatDirective('#', 'target', `${name} format=${format}${options.has('path') ? ` path=${path}` : ''}${options.has('generate') ? ` generate=${generate}` : ''}`));
     } else if (field === 'targets') {
@@ -122,9 +121,7 @@ export function parseRootConfig(content: string, file = '.env', strict = false):
   const modern = multi || [...settings.values()].some(s => s.field === 'format' || s.field === 'path' || s.field === 'generate');
   if (multi && (['format', 'path', 'generate'] as const).some(k => settings.has(k))) configError(file, 1, 'Target declarations cannot be mixed with single-project output settings.');
   if (!multi && selections.length) configError(file, selections[0].line, 'Declare targets before using target selections.');
-  const generateSetting = settings.get('generate');
   const format = settings.get('format')?.value;
-  if (isOutputFormat(format) && !FORMATS[format].reader && generateSetting?.field === 'generate') configError(file, generateSetting.line, 'generate is only supported with format: ts.');
   const selected = new Set<string>();
   for (const selection of selections) {
     if (selection.names[0] === '*') selection.names = targets.map(t => t.name);
