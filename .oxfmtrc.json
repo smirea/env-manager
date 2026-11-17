@@ -1,0 +1,25 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"ignorePatterns": [
+		"node_modules",
+		".build",
+		".swiftpm",
+		"DerivedData",
+		"dist",
+		"build",
+		"generated",
+		"**/generated",
+		"**/*.generated.ts",
+		"**/*.gen.ts",
+		"CHANGELOG.md",
+		".github/workflows/claude.yml",
+		".github/workflows/claude-code-review.yml"
+	],
+	"printWidth": 120,
+	"useTabs": true,
+	"semi": true,
+	"singleQuote": true,
+	"trailingComma": "all",
+	"arrowParens": "avoid",
+	"jsxSingleQuote": true
+}

@@ -33,8 +33,8 @@
         "access": "public"
     },
     "scripts": {
-        "lint": "oxlint --fix",
-        "lint:ci": "oxlint",
+        "lint": "oxlint --fix && oxfmt",
+        "lint:ci": "oxlint && oxfmt --check",
         "typecheck": "bun check",
         "test": "bun test",
         "dev": "bun --watch src/cli.ts"
@@ -50,6 +50,7 @@
         "@types/bun": "^1.4.4",
         "@types/yargs": "^17.0.35",
         "lefthook": "^2.2.2",
+        "oxfmt": "^0.79.0",
         "oxlint": "^1.94.0"
     },
     "packageManager": "bun@1.4.4"
