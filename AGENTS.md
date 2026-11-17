@@ -17,3 +17,11 @@ env-manager is published to npm as `@stefan.inc/env-manager`. It ships its TypeS
 # Consumers
 
 env-manager is a global tool, never a project dependency, and no project's CI installs or runs it. Projects commit what `generate` writes (the readers, and `Config/check-env.sh` for an Xcode target), and CI gets its values from the tracked `.env`, the workflow's `env:` and repository secrets; the README's "CI and deploys" section is the reference. So a release reaches a project only when someone regenerates there with the new version: after a change to what a reader or check script contains, run `env-manager gen --local` in each project under `~/code` that has an env-manager `.env` and commit the result. `~/code/stefan-utils/scripts/setup-new-app` scaffolds new apps to this practice, and `~/code/ai-files/GLOBAL_AGENTS.md` states it for agents; keep both in step with a change here.
+
+# Checks
+
+- `bun run lint` (oxlint, then oxfmt), `bun run typecheck` (`bun check`) and `bun run test` (`bun test`) each finish in about a second. `lint:ci` checks lint and format without fixing.
+- The pre-commit hook in `lefthook.yml` runs one parallel group: a `fix` job that runs oxlint and oxfmt on the staged files and restages them, the type check, and the whole test suite. The test job unsets git's hook variables first, because a test that runs git in a temp directory would otherwise act on this repository. Pre-push only runs the changeset check.
+- `.github/workflows/ci.yml` runs `lint:ci`, `typecheck`, `test` and `install` as parallel jobs, plus `changeset` on pull requests. A CI failure the hook could have caught is a hook bug, so fix the hook.
+- `node/no-process-env` is on everywhere except the modules that read the environment on purpose, which `.oxlintrc.json` names, and the tests. A new module that needs the environment goes on that list.
+- Read the `tests` skill before adding, changing or fixing a test. Tests are `*.test.ts` files beside the code they cover and run in-process, with no network, server or real clock.
