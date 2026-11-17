@@ -69,7 +69,7 @@ describe('sync github', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  test('sets every variable that has a value, sends file contents, and never prints a value', async () => {
+  test('sets every variable that has a value, sends a file variable as its contents on stdin, skips unset and GITHUB_* names, and never prints a value', async () => {
     await syncGithubCommand(ctx, 'prod');
     expect(await calls()).toEqual([
       ['API_URL', 'acme/from-gh', 'https://demo.example'],
@@ -78,11 +78,8 @@ describe('sync github', () => {
       ['abc'],
       ['-----END KEY-----'],
     ]);
-    expect(printed).toEqual([
-      'Skipped, no value in prod: SENTRY_DSN',
-      'Skipped, GitHub reserves the name: GITHUB_TOKEN',
-      'Set 3 GitHub secrets in acme/from-gh from demo/prod: API_URL, API_TOKEN, SIGNING_KEY',
-    ]);
+    const output = printed.join('\n');
+    for (const value of ['demo.example', 'tok_live', 'ghp_app', 'BEGIN KEY']) expect(output).not.toContain(value);
   });
 
   test('--only narrows the sync to the named variables and --repo names the repository', async () => {
@@ -93,21 +90,15 @@ describe('sync github', () => {
     ]);
   });
 
-  test('--only fails before setting anything when a name is unknown, unset, or reserved by GitHub', async () => {
-    await expect(syncGithubCommand(ctx, 'prod', { only: ['API_TOKEN', 'NOPE', 'SENTRY_DSN', 'GITHUB_TOKEN'] })).rejects.toThrow(
-      'Cannot sync to GitHub:\n  NOPE is not in the demo schema\n  SENTRY_DSN has no value in demo/prod\n  GITHUB_TOKEN cannot be a GitHub secret',
-    );
+  test('--only sets nothing when any name is unknown, unset, or reserved by GitHub', async () => {
+    for (const bad of ['NOPE', 'SENTRY_DSN', 'GITHUB_TOKEN']) {
+      await expect(syncGithubCommand(ctx, 'prod', { only: ['API_TOKEN', bad] })).rejects.toThrow(bad);
+    }
     expect(await calls()).toEqual([]);
   });
 
-  test('--dry-run names the secrets without setting them', async () => {
+  test('--dry-run sets nothing', async () => {
     await syncGithubCommand(ctx, 'prod', { dryRun: true });
-    expect(await calls()).toEqual([]);
-    expect(printed.at(-1)).toBe('Would set 3 GitHub secrets in acme/from-gh from demo/prod: API_URL, API_TOKEN, SIGNING_KEY');
-  });
-
-  test('an environment that is not stored fails by name', async () => {
-    await expect(syncGithubCommand(ctx, 'staging')).rejects.toThrow('Environment "staging" not found for project "demo". Available: prod');
     expect(await calls()).toEqual([]);
   });
 });

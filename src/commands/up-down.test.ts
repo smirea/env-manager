@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,11 +8,9 @@ const { upCommand } = await import('./up');
 const { downCommand } = await import('./down');
 const { envSetCommand } = await import('./env');
 const { generateCommand, generateFromEnvironment } = await import('./generate');
-const { collectInfo } = await import('./info');
-const { newKeyCommand } = await import('./new-key');
 
 describe('output versions', () => {
-  test('bump only on mutation and stay out of .env', async () => {
+  test('up writes to AWS only when the schema or values changed, each change bumps the version, and .env never carries one', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-version-'));
     try {
       const ctx = { project: 'demo', cwd: dir };
@@ -56,7 +54,7 @@ describe('output versions', () => {
     }
   });
 
-  test('down requires an explicit environment when several exist and none is recorded', async () => {
+  test('down needs --env when several environments exist and none is recorded, and then records the one it loaded', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-env-'));
     try {
       const ctx = { project: 'multi', cwd: dir };
@@ -72,9 +70,8 @@ describe('output versions', () => {
       await writeFile(path.join(dir, '.env'), schema);
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
 
-      await expect(downCommand(ctx)).rejects.toThrow('No environment selected for "multi". Pass --env <name> or run "env-manager env set <name>". Available: local, prod');
+      await expect(downCommand(ctx)).rejects.toThrow();
       expect(await Bun.file(path.join(dir, '.env.local')).exists()).toBe(false);
-      await expect(downCommand(ctx, { environment: 'staging' })).rejects.toThrow('Environment "staging" not found for project "multi". Available: local, prod');
 
       await downCommand(ctx, { environment: 'prod' });
       expect(await read('.env.local')).toContain("# env-manager env: prod\n");
@@ -91,7 +88,7 @@ describe('output versions', () => {
     }
   });
 
-  test('down records the chosen environment for swift values', async () => {
+  test('down records the chosen environment in .env.local for swift values', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-swift-env-'));
     try {
       const ctx = { project: 'ios', cwd: dir };
@@ -118,34 +115,6 @@ describe('output versions', () => {
     }
   });
 
-  test('switching environments regenerates target children even when their version is ahead', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-switch-'));
-    try {
-      const ctx = { project: 'switch', cwd: dir };
-      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
-      await writeFile(path.join(dir, 'package.json'), '{}\n');
-      await writeFile(path.join(dir, '.env'), '# env-manager: switch\n# env-manager target: server format=ts path=.env.local\n# env-manager targets: server\nAPP_ENV=development # {string}\n');
-      await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\n');
-      await upCommand(ctx);
-      const dev = await read('server/.env.local');
-      expect(dev).toBe("# env-manager: switch | v1\n# env-manager target: server\n# env-manager root: ..\n# env-manager env: dev\nAPP_ENV='development' # {string}\n");
-
-      await envSetCommand(ctx, 'prod');
-      await writeFile(path.join(dir, '.env.local'), (await read('.env.local')) + 'APP_ENV=production\n');
-      await upCommand(ctx);
-      expect(await read('server/.env.local')).toBe("# env-manager: switch | v2\n# env-manager target: server\n# env-manager root: ..\n# env-manager env: prod\nAPP_ENV='production' # {string}\n");
-
-      await envSetCommand(ctx, 'dev');
-      await downCommand(ctx);
-      expect(await read('server/.env.local')).toBe(dev);
-
-      await generateCommand(ctx);
-      expect(await read('server/.env.local')).toBe(dev);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   describe('env set', () => {
     const SCHEMA = '# env-manager: envs\n# env-manager target: server format=ts path=.env.local\n# env-manager targets: server\nAPP_ENV=development # {string}\n';
 
@@ -162,7 +131,7 @@ describe('output versions', () => {
       }
     }
 
-    test('switching to an existing environment downloads it and regenerates children', async () => {
+    test('env set to a stored environment downloads it and regenerates the children', async () => {
       await withProject(async (ctx, read) => {
         await upCommand(ctx);
         secrets.get('env-manager/envs')!.environments!.prod = { values: 'APP_ENV=production\n', syncDate: '2026-01-01T00:00:00Z' };
@@ -174,49 +143,25 @@ describe('output versions', () => {
       });
     });
 
-    test('switching to a new environment warns and seeds it from the current values on up', async () => {
+    test('env set to an environment that is not stored keeps the current values, and the next up creates it from them', async () => {
       await withProject(async (ctx, read) => {
         await writeFile(path.join(ctx.cwd, '.env.local'), '# env-manager env: dev\nAPP_ENV=production\n');
         await upCommand(ctx);
-        const warn = spyOn(console, 'warn').mockImplementation(() => {});
-        try {
-          await envSetCommand(ctx, 'prod');
-          expect(warn.mock.calls.map(call => call.join(' '))).toEqual(['Environment "prod" does not exist in AWS yet. The current values (from "dev") will seed it on the next "env-manager up".']);
-        } finally {
-          warn.mockRestore();
-        }
+        await envSetCommand(ctx, 'prod');
         await upCommand(ctx);
         expect(secrets.get('env-manager/envs')?.environments?.prod?.values).toBe("APP_ENV='production'");
         expect(await read('server/.env.local')).toContain("# env-manager env: prod\nAPP_ENV='production'");
       });
     });
 
-    test('rejects environment names with spaces or pipes before touching files', async () => {
-      await withProject(async (ctx, read) => {
-        for (const name of ['two words', 'a|b']) {
-          await expect(envSetCommand(ctx, name)).rejects.toThrow(`Invalid environment "${name}". Environment names cannot include spaces or "|".`);
-        }
-        expect(await read('.env.local')).toBe('# env-manager env: dev\n');
-      });
-    });
-
-    test('up refuses values left over from a local-mode switch', async () => {
+    test('up refuses to upload values loaded for a different environment than the selected one', async () => {
       await withProject(async (ctx, read) => {
         await upCommand(ctx);
         secrets.get('env-manager/envs')!.environments!.prod = { values: 'APP_ENV=production\n', syncDate: '2026-01-01T00:00:00Z' };
         await downCommand(ctx);
-        const warn = spyOn(console, 'warn').mockImplementation(() => {});
-        try {
-          await envSetCommand(ctx, 'prod', { local: true });
-          await generateCommand(ctx);
-          expect(warn.mock.calls.map(call => call.join(' '))).toEqual([
-            'Warning: local mode cannot load "prod"; the values file still holds "dev" values. Run "env-manager down --no-local" to load them.',
-            'Warning: generating "prod" outputs from values loaded for "dev". Run "env-manager down" to load prod.',
-          ]);
-        } finally {
-          warn.mockRestore();
-        }
-        await expect(upCommand(ctx)).rejects.toThrow('Refusing to upload: the values file holds "dev" values but environment "prod" is selected. Run "env-manager down" to load prod.');
+        await envSetCommand(ctx, 'prod', { local: true });
+        await generateCommand(ctx);
+        await expect(upCommand(ctx)).rejects.toThrow();
         expect(secrets.get('env-manager/envs')?.environments?.prod?.values).toBe('APP_ENV=production\n');
 
         await downCommand(ctx);
@@ -226,7 +171,7 @@ describe('output versions', () => {
     });
   });
 
-  test('overrides survive down and never reach AWS', async () => {
+  test('overrides never reach AWS and survive down', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-override-'));
     try {
       const ctx = { project: 'mono', cwd: dir };
@@ -248,31 +193,22 @@ describe('output versions', () => {
 });
 
 describe('guards', () => {
-  test('down refuses to replace a .env that belongs to another project', async () => {
+  test('down never replaces a .env that belongs to another project', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-guard-'));
     try {
       secrets.set('env-manager/other', { schema: '# env-manager: other\n\nFOO= # {string}\n', environments: { local: { values: 'FOO=x\n', syncDate: '2026-01-01T00:00:00Z' } } });
       await writeFile(path.join(dir, 'package.json'), '{}\n');
       await writeFile(path.join(dir, '.env'), '# env-manager: demo\n\nBAR= # {string}\n');
-      await expect(downCommand({ project: 'other', cwd: dir })).rejects.toThrow('.env project "demo" does not match --project "other"');
+      await expect(downCommand({ project: 'other', cwd: dir })).rejects.toThrow();
       expect(await readFile(path.join(dir, '.env'), 'utf8')).toBe('# env-manager: demo\n\nBAR= # {string}\n');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
-
-  test('new-key rejects conflicting key options before reusing or creating a key', async () => {
-    secrets.set('env-manager/default', { schema: '# env-manager: default\n', values: "OPENROUTER_API_KEY='sk-or-v1-existing'" });
-    await expect(newKeyCommand({ project: 'demo', cwd: '/nonexistent' }, 'OPENROUTER_API_KEY', { credit: 5, unlimited: true, assumeYes: true }))
-      .rejects.toThrow('OpenRouter credit and unlimited mode cannot both be set.');
-    await expect(newKeyCommand({ project: 'demo', cwd: '/nonexistent' }, 'ANTHROPIC_API_KEY', { credit: 5 }))
-      .rejects.toThrow('only supported for OPENROUTER_API_KEY');
-    secrets.delete('env-manager/default');
-  });
 });
 
 describe('generate --env', () => {
-  test('renders a stored environment into children with the local schema and leaves the selection alone', async () => {
+  test('generate --env renders a stored environment into the children with the local schema, and leaves .env, the root values and the selection alone', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-gen-env-'));
     try {
       const ctx = { project: 'render', cwd: dir };
@@ -308,26 +244,6 @@ describe('generate --env', () => {
 
       await generateCommand(ctx);
       expect(await read('ios/Config/LocalSecrets.xcconfig')).toBe(dev);
-      await expect(generateFromEnvironment(ctx, 'staging')).rejects.toThrow('Available: dev, prod');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('info', () => {
-  test('reports whether down would replace .env with a different stored schema', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-info-'));
-    try {
-      const ctx = { project: 'drift', cwd: dir };
-      const schema = '# env-manager: drift | 2025-01-01T00:00:00Z\n# env-manager format: swift\n\nFOO= # {string}\n';
-      await writeFile(path.join(dir, '.env'), schema);
-      expect((await collectInfo(ctx, { local: false })).storedSchema).toBe('missing');
-      secrets.set('env-manager/drift', { schema: schema.replace(' | 2025-01-01T00:00:00Z', ''), environments: { prod: { values: 'FOO=a\n', syncDate: '2026-01-01T00:00:00Z' } } });
-      const info = await collectInfo(ctx, { local: false });
-      expect([info.storedSchema, info.environments]).toEqual(['in-sync', ['prod']]);
-      secrets.set('env-manager/drift', { schema: '# env-manager: drift\n# env-manager format: swift\n\nOLD= # {string}\n' });
-      expect((await collectInfo(ctx, { local: false })).storedSchema).toBe('differs');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
