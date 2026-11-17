@@ -20,7 +20,12 @@ const { name, version } = await Bun.file('package.json').json();
 const published = (await $`npm view ${`${name}@${version}`} version`.nothrow().quiet().text()).trim() === version;
 // Publishing before pushing lets a rerun converge: a version npm already has is skipped, and its commit is pushed.
 if (published) console.log(`${name}@${version} is already on npm.`);
-else await $`npm publish`;
+else {
+  const publish = await $`npm publish`.nothrow();
+  // npm holds a new version back for a few minutes, during which `npm view` cannot see it. A run in that window
+  // publishes it again and npm answers 409, which means the version is there.
+  if (publish.exitCode !== 0 && !/Cannot publish over/.test(publish.stderr.toString())) process.exit(publish.exitCode);
+}
 
 if (pending.length) {
   await $`git add --all .changeset package.json CHANGELOG.md`;
