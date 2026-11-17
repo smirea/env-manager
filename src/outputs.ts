@@ -70,26 +70,19 @@ function hashContent(content: string): string {
   return new Bun.CryptoHasher('sha256').update(content).digest('hex').slice(0, 16);
 }
 
-export function versionRecordsEqual(left: OutputVersions, right: OutputVersions): boolean {
+// Versions label content, so two records that hold the same content are equal whatever their labels say.
+export function sameOutputs(left: OutputVersions, right: OutputVersions): boolean {
   const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length
-    && keys.every(key => left[key].version === right[key]?.version && left[key].hash === right[key]?.hash);
+  return keys.length === Object.keys(right).length && keys.every(key => left[key].hash === right[key]?.hash);
 }
 
-// Prefers a known version whose hash matches. With no history for the key, a file
-// identical to the new content keeps its version so a fresh checkout does not rewrite it.
-function resolveVersion(
-  key: string,
-  hash: string,
-  candidates: (OutputVersions | undefined)[],
-  file: { version: number | null; unchanged: boolean }
-): OutputVersion {
+// A known version for this content is reused, so a hand edit heals to the label it had. Anything
+// else is new content and takes the next number.
+function resolveVersion(key: string, hash: string, candidates: (OutputVersions | undefined)[], fileVersion: number | null): OutputVersion {
   const entries = candidates.map(c => c?.[key]).filter((e): e is OutputVersion => !!e);
   const match = entries.filter(e => e.hash === hash).sort((a, b) => b.version - a.version)[0];
   if (match) return match;
-  const date = new Date().toISOString();
-  if (!entries.length && file.unchanged && file.version !== null) return { version: file.version, hash, date };
-  return { version: Math.max(file.version ?? 0, ...entries.map(e => e.version)) + 1, hash, date };
+  return { version: Math.max(fileVersion ?? 0, ...entries.map(e => e.version)) + 1, hash, date: new Date().toISOString() };
 }
 
 function commentPrefix(output: PlannedOutput): CommentPrefix {
@@ -173,14 +166,14 @@ export async function materialize(project: Project, options: MaterializeOptions 
     const selected = selectValues(output.schema, output.source ? values : childValues);
     const existing = output.source ? sourceContent : await readText(output.path);
     const fileVersion = existing === null ? null : readMetadata(existing).version;
-    const renderedAtFileVersion = renderOutput(project, output, selected, environment, fileVersion);
-    const entry = resolveVersion(key, hashContent(renderOutput(project, output, selected, environment, null)), candidates, {
-      version: fileVersion,
-      unchanged: !output.source && existing !== null && existing === renderedAtFileVersion,
-    });
+    const hash = hashContent(renderOutput(project, output, selected, environment, null));
+    // A file that already holds its render keeps the version it carries: the file is what git
+    // shares, while the record beside it is per checkout and goes stale on every pull.
+    const current = !output.source && existing !== null && fileVersion !== null
+      && matchesRender(output, existing, renderOutput(project, output, selected, environment, fileVersion));
+    const entry = current ? { version: fileVersion, hash } : resolveVersion(key, hash, candidates, fileVersion);
     record[key] = entry;
-    if (output.source) continue;
-    if (existing !== null && fileVersion !== null && fileVersion >= entry.version && matchesRender(output, existing, renderedAtFileVersion)) continue;
+    if (output.source || current) continue;
     if (await writeManagedFile(output.path, renderOutput(project, output, selected, environment, entry.version))) {
       console.log(`Generated ${key}`);
     }

@@ -2,7 +2,7 @@ import { collectFilePayload } from '../file-sync';
 import { writeManagedFile } from '../files';
 import { EnvManagerError } from '../errors';
 import { ensureHeader } from '../metadata';
-import { materialize, versionRecordsEqual } from '../outputs';
+import { materialize, sameOutputs } from '../outputs';
 import { envValuesEqual, parseEnvValues, serializeEnvValues } from '../parser';
 import { loadProject, type CommandContext } from '../project';
 import { canonicalSchema, readProject, writeProject } from '../store';
@@ -37,7 +37,7 @@ export async function upCommand(ctx: CommandContext): Promise<void> {
   const changed = !existing
     || canonicalSchema(content) !== existing.schema
     || valuesChanged
-    || !versionRecordsEqual(outputs, existingEnvironment?.outputs ?? {});
+    || !sameOutputs(outputs, existingEnvironment?.outputs ?? {});
 
   if (changed) {
     await writeProject(project.name, {

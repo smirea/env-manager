@@ -547,8 +547,10 @@ target child, and each reader. The version sits at the end of the file's header
 (`| vN`).
 
 An output's version increments only when the content env-manager would write for
-it changes. A file is rewritten when its version is lower than the known
-version, or when its content no longer matches what env-manager would write.
+it changes, which means its values or the schema changed. A file is rewritten
+only when its content no longer matches what env-manager would write; a file
+that matches keeps the version it carries, so a reader pulled from git is never
+relabelled by a checkout whose own record is older.
 Readers are compared ignoring whitespace, quotes, semicolons, commas, and
 parentheses; values files are compared by parsed values and `env-manager`
 metadata lines. Formatter-only edits survive later runs, while hand edits and

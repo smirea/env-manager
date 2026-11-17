@@ -133,7 +133,7 @@ export default env;
     });
   });
 
-  test('versions each output and rewrites only when the version is lower', async () => {
+  test('versions each output and rewrites only when its content drifts', async () => {
     await withTempDir(async (dir) => {
       const ctx = { project: 'test-project', cwd: dir };
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -165,6 +165,30 @@ export default env;
       const regenerated = await read('env.ts');
       expect(regenerated.split('\n')[0]).toBe('// env-manager: test-project | v2');
       expect(regenerated).toContain('  BAR: z.coerce.number().int(),');
+    });
+  });
+
+  test('a pulled reader that matches its render keeps its version, whatever the local record holds', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager generate: env.ts\n\nFOO=bar # {string}\n');
+      await generateCommand(ctx);
+      expect((await read('env.ts')).split('\n')[0]).toBe('// env-manager: test-project | v1');
+
+      // What `git pull` brings: a schema with a new variable and the reader someone else generated for it.
+      const pulled = (await read('env.ts'))
+        .replace('| v1', '| v2')
+        .replace('  FOO: z.string(),', '  FOO: z.string(),\n  BAR: z.coerce.number().int(),');
+      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager generate: env.ts\n\nFOO=bar # {string}\nBAR=1 # {int}\n');
+      await writeFile(path.join(dir, 'env.ts'), pulled);
+
+      await generateCommand(ctx);
+      expect(await read('env.ts')).toBe(pulled);
+      expect(await read('.env.local')).toMatch(/^# env-manager output: env\.ts v2 [0-9a-f]{16}$/m);
+
+      await generateCommand(ctx);
+      expect(await read('env.ts')).toBe(pulled);
     });
   });
 
