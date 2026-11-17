@@ -1,6 +1,6 @@
 # Releases
 
-env-manager is published to npm as `@stefan.inc/env-manager`. It ships its TypeScript source with no build step: `files` publishes `src` without the tests, beside the README and `LICENSE`, and Bun runs `src/cli.ts` directly. `src/package.test.ts` fails when the tarball holds anything else.
+env-manager is published to npm as `@stefan.inc/env-manager`. It ships its TypeScript source with no build step: `files` publishes `src` without the tests, beside the README and `LICENSE`, and Bun runs `src/cli.ts` directly. CI's `install` job runs `.github/scripts/check-package.ts`, which fails when the tarball holds anything else.
 
 - Install globally with `bun add -g @stefan.inc/env-manager`, which puts `env-manager` on PATH. It is never a project dependency.
 - Runtime imports belong in `dependencies`; tooling and types in `devDependencies`, which installs never fetch. CI's `install` job packs the package, installs it globally and runs `env-manager --help`, so a missing runtime dependency fails there.
