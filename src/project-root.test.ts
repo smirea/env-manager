@@ -1,17 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { locateProject, resolveProjectName } from './project-root';
-
-async function withTempDir(fn: (dir: string) => Promise<void>) {
-  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'env-manager-root-')));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { withTempDir } from './test-setup';
 
 function gitInit(dir: string) {
   const result = Bun.spawnSync(['git', 'init', dir], { env: process.env });

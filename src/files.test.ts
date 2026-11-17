@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { appendFile, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withGitUpdates, writeManagedFile } from './files';
+import { withTempDir } from './test-setup';
 
 function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-C', dir, ...args], { env: process.env });
@@ -10,9 +10,8 @@ function git(dir: string, ...args: string[]): string {
   return result.stdout.toString().trimEnd();
 }
 
-async function withRepo(fn: (dir: string) => Promise<void>) {
-  const dir = await mkdtemp(join(tmpdir(), 'env-manager-git-'));
-  try {
+function withRepo(fn: (dir: string) => Promise<void>) {
+  return withTempDir(async (dir) => {
     git(dir, 'init');
     await appendFile(join(dir, '.git/config'), '[user]\n\temail = test@example.com\n\tname = Test\n[commit]\n\tgpgsign = false\n[core]\n\thooksPath = /dev/null\n');
     for (const name of ['clean', 'staged', 'dirty', 'unrelated', 'space file']) {
@@ -22,9 +21,7 @@ async function withRepo(fn: (dir: string) => Promise<void>) {
     git(dir, 'add', '.');
     git(dir, 'commit', '-m', 'initial');
     await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  });
 }
 
 describe('Git updates', () => {

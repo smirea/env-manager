@@ -1,20 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NotInitializedError } from '../errors';
-import { secrets } from '../test-aws';
-
-const { collectInfo } = await import('./info');
-
-async function withTempDir(fn: (dir: string) => Promise<void>) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-info-'));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { secrets, withTempDir } from '../test-setup';
+import { collectInfo } from './info';
 
 describe('info', () => {
   test('info describes the selected environment, overrides, targets and each variable, and reads no storage in local mode', async () => {

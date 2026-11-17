@@ -1,18 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { collectFilePayload, writeFilesFromPayload } from "./file-sync";
 import type { EnvVarSchema } from "./parser";
-
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "env-manager-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { withTempDir } from "./test-setup";
 
 function fileSchema(overrides: Partial<EnvVarSchema> = {}): EnvVarSchema {
   return { name: "CERT", type: "file", optional: false, validators: [], defaultValue: null, lineNumber: 1, ...overrides };

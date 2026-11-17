@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { secrets } from '../test-aws';
-
-const { syncGithubCommand } = await import('./sync');
+import { secrets } from '../test-setup';
+import { syncGithubCommand } from './sync';
 
 const SCHEMA = [
   '# env-manager: demo',

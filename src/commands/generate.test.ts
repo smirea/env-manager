@@ -2,21 +2,19 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generateCommand } from './generate';
+import { secrets, withTempDir as withEmptyDir } from '../test-setup';
+import { generateCommand, generateFromEnvironment } from './generate';
 
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
-  try {
+function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
+  return withEmptyDir(async (dir) => {
     await writeFile(path.join(dir, 'package.json'), '{}\n');
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+    await fn(dir);
+  });
 }
 
 const ENV_CONTENT = `# env-manager: test-project | 2025-01-01T00:00:00Z\n\nFOO=bar # {optional string}\n`;
 
-describe('generate command', () => {
+describe('generate', () => {
   test('the reader maps each schema type to its zod validator', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), [
@@ -402,6 +400,44 @@ export default env;
       await rm(path.join(dir, 'server'), { recursive: true });
       await generateCommand(ctx);
       expect(await Bun.file(path.join(dir, 'client/src/env.ts')).exists()).toBe(true);
+    });
+  });
+
+  test('generate --env renders a stored environment into the children with the local schema, and leaves .env, the root values and the selection alone', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'render', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      const schema = [
+        '# env-manager: render',
+        '# env-manager target: ios format=swift',
+        '# env-manager targets: ios',
+        'API_URL= # {url}',
+        'NEW_FLAG=on # {string}',
+        '',
+      ].join('\n');
+      await writeFile(path.join(dir, '.env'), schema);
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\nAPI_URL=http://127.0.0.1:1\n');
+      await writeFile(path.join(dir, '.env.override'), 'API_URL=http://127.0.0.1:2\n');
+      secrets.set('env-manager/render', {
+        schema: '# env-manager: render\n# env-manager target: ios format=swift\n# env-manager targets: ios\nAPI_URL= # {url}\n',
+        environments: {
+          dev: { values: 'API_URL=http://127.0.0.1:1\n', syncDate: '2026-01-01T00:00:00Z' },
+          prod: { values: 'API_URL=https://prod.example.com\n', syncDate: '2026-01-01T00:00:00Z' },
+        },
+      });
+      await generateCommand(ctx);
+      const dev = await read('ios/Config/LocalSecrets.xcconfig');
+      const rootValues = await read('.env.local');
+
+      await generateFromEnvironment(ctx, 'prod');
+      const prod = await read('ios/Config/LocalSecrets.xcconfig');
+      expect(prod).toContain('// env-manager env: prod\n');
+      expect(prod).toContain('API_URL = https:/$()/prod.example.com\nNEW_FLAG = on\n');
+      expect(await read('.env')).toBe(schema);
+      expect(await read('.env.local')).toBe(rootValues);
+
+      await generateCommand(ctx);
+      expect(await read('ios/Config/LocalSecrets.xcconfig')).toBe(dev);
     });
   });
 

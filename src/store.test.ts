@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { secrets } from './test-aws';
-
-const { readProject, validateProjectName } = await import('./store');
+import { readProject, validateProjectName } from './store';
+import { secrets } from './test-setup';
 
 describe('store', () => {
   test('a secret from before environments existed reads as the local environment', async () => {

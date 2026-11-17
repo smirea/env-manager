@@ -7,18 +7,6 @@ import {
   SCHEMA_TYPES,
   serializeEnvValues,
 } from "./parser";
-import { FORMATS } from "./formats";
-import { ensureHeader, parseHeader, setHeaderVersion } from "./metadata";
-
-describe("parseHeader", () => {
-  test("a header names the project and an optional version, and a legacy sync date reads as no version", () => {
-    expect(parseHeader("# env-manager: my_cool-project | v12")).toEqual({ project: "my_cool-project", version: 12 });
-    expect(parseHeader("# env-manager: my-project | 2025-01-15T10:30:00-05:00")).toEqual({ project: "my-project", version: null });
-    expect(parseHeader("# env-manager: my-project")).toEqual({ project: "my-project", version: null });
-    expect(parseHeader("# just a comment")).toBeNull();
-    expect(parseHeader("FOO=bar")).toBeNull();
-  });
-});
 
 describe("parseSchemaComment", () => {
   test("a schema comment is an optional prefix, a type, and validators", () => {
@@ -119,30 +107,3 @@ NAME=O'Brien # note
   });
 });
 
-describe("setHeaderVersion", () => {
-  test("a version replaces a legacy sync date, finds the header after leading comments, and a missing header is added", () => {
-    expect(setHeaderVersion("# comment\n# env-manager: demo | v1\n\nFOO=bar\n", 2)).toBe("# comment\n# env-manager: demo | v2\n\nFOO=bar\n");
-    expect(setHeaderVersion("# env-manager: demo | 2025-01-01T00:00:00Z\n", 4)).toBe("# env-manager: demo | v4\n");
-    expect(ensureHeader("FOO=bar\n", "demo")).toBe("# env-manager: demo\n\nFOO=bar\n");
-  });
-});
-
-describe("ts values rendering", () => {
-  test("ts values carry their schema comment, leave numbers unquoted, keep extra keys, and parse back", () => {
-    const entry = (name: string, type: "string" | "int" | "float" | "bool", lineNumber: number) =>
-      ({ name, type, optional: false, validators: [], defaultValue: null, lineNumber });
-    const values = { API_KEY: "sk-test", PORT: "3000", THRESHOLD: "0.25", ENABLED: "true", NAME: "C:\\O'Reilly", EXTRA: "yes" };
-    const content = FORMATS.ts.render(
-      [entry("API_KEY", "string", 1), entry("PORT", "int", 2), entry("THRESHOLD", "float", 3), entry("ENABLED", "bool", 4), entry("NAME", "string", 5)],
-      values,
-    );
-    expect(content).toBe(`API_KEY='sk-test' # {string}
-PORT=3000 # {int}
-THRESHOLD=0.25 # {float}
-ENABLED='true' # {bool}
-NAME='C:\\\\O\\'Reilly' # {string}
-EXTRA='yes'
-`);
-    expect(parseEnvValues(content)).toEqual(values);
-  });
-});

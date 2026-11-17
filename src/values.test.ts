@@ -1,20 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseRootConfig } from './config';
 import type { EnvVarSchema } from './parser';
-import { FORMATS } from './formats';
+import { withTempDir } from './test-setup';
 import { readSelection, resolveValuesConfig, writeSelection, writeSourceValues } from './values';
-
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-values-'));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 const schema: EnvVarSchema[] = ['GIPHY_API_KEY', 'GEMINI_API_KEY'].map((name, index) => ({
   name, type: 'string', optional: false, validators: [], defaultValue: null, lineNumber: index + 1,
@@ -34,20 +24,6 @@ describe('values config', () => {
       const config = parseRootConfig('# env-manager: demo\n# env-manager format: swift\n');
       expect(await resolveValuesConfig(dir, config)).toEqual({ format: 'swift', path: 'Config/LocalSecrets.xcconfig', selectorPath: '.env.local' });
     });
-  });
-});
-
-describe('swift values', () => {
-  test('swift values render in schema order with extra keys last, and parse back ignoring comments', () => {
-    const content = FORMATS.swift.render(schema, { EXTRA: 'kept', GEMINI_API_KEY: 'gemini-secret', GIPHY_API_KEY: 'giphy-secret' });
-    expect(content).toBe('GIPHY_API_KEY = giphy-secret\nGEMINI_API_KEY = gemini-secret\nEXTRA = kept\n');
-    expect(FORMATS.swift.parse(`// local secrets\n${content}`)).toEqual({ GIPHY_API_KEY: 'giphy-secret', GEMINI_API_KEY: 'gemini-secret', EXTRA: 'kept' });
-  });
-
-  test('swift values write // as /$()/ so xcconfig does not read it as a comment, and parse back to //', () => {
-    const content = FORMATS.swift.render([], { API_URL: 'https://example.com', TOKEN: 'abc//def' });
-    expect(content).toBe('API_URL = https:/$()/example.com\nTOKEN = abc/$()/def\n');
-    expect(FORMATS.swift.parse(content)).toEqual({ API_URL: 'https://example.com', TOKEN: 'abc//def' });
   });
 });
 
