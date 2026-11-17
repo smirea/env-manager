@@ -6,12 +6,14 @@ pre-commit:
       run: bunx oxlint --fix {staged_files}
       stage_fixed: true
     typecheck:
-      run: bunx --bun tsgo --noEmit
+      run: bun run typecheck
     test:
-      run: bun test --pass-with-no-tests
+      run: bun run test
 
 pre-push:
   commands:
     # A push to master releases what its changesets name, so a package change without one is never published.
+    # Git exports GIT_DIR to hooks in a linked worktree, and changesets runs git from .changeset, which GIT_DIR alone
+    # makes the work tree root, so it finds no changesets.
     changeset:
-      run: bunx changeset status --since=origin/master
+      run: env -u GIT_DIR bunx changeset status --since=origin/master

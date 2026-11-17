@@ -1,111 +1,31 @@
-import { describe, expect, test } from 'bun:test';
-import {
-  mkdtemp,
-  mkdir,
-  realpath,
-  rm,
-  symlink,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
-import os from 'node:os';
+import { expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { loadOwnEnv, resolveOwnPackageRoot } from './env-loader';
+import { loadOwnEnv } from './env-loader';
+import { withTempDir } from './test-setup';
 
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-env-loader-'));
-  try {
-    return await fn(dir);
-  } finally {
-    await unlink(path.join(dir, 'entry-link.ts')).catch(() => undefined);
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+const NAMES = ['AWS_REGION', 'SHARED_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];
 
-describe('env loader', () => {
-  test('loadOwnEnv overrides preloaded env while keeping .env.local precedence and skipping empty placeholders', async () => {
-    await withTempDir(async (dir) => {
-      const packageRoot = path.join(dir, 'env-manager');
-      await mkdir(packageRoot, { recursive: true });
-      await writeFile(
-        path.join(packageRoot, '.env'),
-        'AWS_REGION=from-dot-env\nSHARED_KEY=from-dot-env\nAWS_SECRET_ACCESS_KEY= # {string}\n'
-      );
-      await writeFile(
-        path.join(packageRoot, '.env.local'),
-        'AWS_REGION=from-dot-env-local\nAWS_ACCESS_KEY_ID=own-access-key\n'
-      );
+test("env-manager's own .env.local, then its .env, override what Bun loaded from the working directory, but an empty placeholder never clears a shell value", async () => {
+  const previous = Object.fromEntries(NAMES.map(name => [name, process.env[name]]));
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, '.env'), 'AWS_REGION=from-dot-env\nSHARED_KEY=from-dot-env\nAWS_SECRET_ACCESS_KEY= # {string}\n');
+    await writeFile(path.join(dir, '.env.local'), 'AWS_REGION=from-dot-env-local\nAWS_ACCESS_KEY_ID=own-access-key\n');
+    process.env.AWS_REGION = 'from-cwd';
+    process.env.SHARED_KEY = 'from-cwd';
+    process.env.AWS_ACCESS_KEY_ID = 'from-cwd';
+    process.env.AWS_SECRET_ACCESS_KEY = 'from-shell';
 
-      const previousRegion = process.env.AWS_REGION;
-      const previousSharedKey = process.env.SHARED_KEY;
-      const previousAccessKey = process.env.AWS_ACCESS_KEY_ID;
-      const previousSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
+    loadOwnEnv(dir);
 
-      process.env.AWS_REGION = 'from-cwd';
-      process.env.SHARED_KEY = 'from-cwd';
-      process.env.AWS_ACCESS_KEY_ID = 'from-cwd';
-      process.env.AWS_SECRET_ACCESS_KEY = 'from-shell';
-
-      try {
-        loadOwnEnv(packageRoot);
-
-        expect(process.env.AWS_REGION).toBe('from-dot-env-local');
-        expect(process.env.SHARED_KEY).toBe('from-dot-env');
-        expect(process.env.AWS_ACCESS_KEY_ID).toBe('own-access-key');
-        expect(process.env.AWS_SECRET_ACCESS_KEY).toBe('from-shell');
-      } finally {
-        restoreEnvVar('AWS_REGION', previousRegion);
-        restoreEnvVar('SHARED_KEY', previousSharedKey);
-        restoreEnvVar('AWS_ACCESS_KEY_ID', previousAccessKey);
-        restoreEnvVar('AWS_SECRET_ACCESS_KEY', previousSecretKey);
-      }
-    });
-  });
-
-  test('resolves env-manager package root from module path', async () => {
-    await withTempDir(async (dir) => {
-      const packageRoot = path.join(dir, 'env-manager');
-      const sourceDir = path.join(packageRoot, 'src');
-      const modulePath = path.join(sourceDir, 'cli.ts');
-
-      await mkdir(sourceDir, { recursive: true });
-      await writeFile(
-        path.join(packageRoot, 'package.json'),
-        JSON.stringify({ name: 'env-manager' })
-      );
-      await writeFile(modulePath, '');
-
-      const realPackageRoot = await realpath(packageRoot);
-      expect(resolveOwnPackageRoot(pathToFileURL(modulePath).href)).toBe(realPackageRoot);
-    });
-  });
-
-  test('follows symlinked entrypoints back to the real package root', async () => {
-    await withTempDir(async (dir) => {
-      const packageRoot = path.join(dir, 'env-manager');
-      const sourceDir = path.join(packageRoot, 'src');
-      const modulePath = path.join(sourceDir, 'cli.ts');
-      const symlinkPath = path.join(dir, 'entry-link.ts');
-
-      await mkdir(sourceDir, { recursive: true });
-      await writeFile(
-        path.join(packageRoot, 'package.json'),
-        JSON.stringify({ name: 'env-manager' })
-      );
-      await writeFile(modulePath, '');
-      await symlink(modulePath, symlinkPath);
-
-      const realPackageRoot = await realpath(packageRoot);
-      expect(resolveOwnPackageRoot(pathToFileURL(symlinkPath).href)).toBe(realPackageRoot);
-    });
+    expect(process.env.AWS_REGION).toBe('from-dot-env-local');
+    expect(process.env.SHARED_KEY).toBe('from-dot-env');
+    expect(process.env.AWS_ACCESS_KEY_ID).toBe('own-access-key');
+    expect(process.env.AWS_SECRET_ACCESS_KEY).toBe('from-shell');
+  }).finally(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   });
 });
-
-function restoreEnvVar(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-    return;
-  }
-  process.env[name] = value;
-}

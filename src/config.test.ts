@@ -15,7 +15,7 @@ DATABASE_URL= # {url}
 `;
 
 describe('root config validation', () => {
-  test('scopes replace previous selections and empty selections count as target use', () => {
+  test('a targets selection replaces the previous one, and an empty selection still counts as using the target', () => {
     const config = parseRootConfig(MONOREPO, 'root.env');
     expect(schemaForTarget(config, 'client').map(s => s.name)).toEqual(['API_URL', 'CLIENT_SETTING']);
     expect(schemaForTarget(config, 'server').map(s => s.name)).toEqual(['API_URL', 'DATABASE_URL']);
@@ -24,14 +24,14 @@ describe('root config validation', () => {
     expect(schemaForTarget(empty, 'ios')).toEqual([]);
   });
 
-  test('local alone keeps untyped legacy variables usable and strict check reports them', () => {
+  test('local alone keeps untyped legacy variables valid, while output settings or --strict require types', () => {
     const content = '# env-manager: demo | 2026-01-01T00:00:00Z\n# env-manager local:true\nUNTYPED=legacy\n';
     expect(parseRootConfig(content).modern).toBe(false);
     expect(() => parseRootConfig('  # env-manager format: ts\nUNTYPED=legacy\n')).toThrow('needs a type');
     expect(() => parseRootConfig(content, 'root.env', true)).toThrow('root.env:3: Variable UNTYPED needs a type');
   });
 
-  test('rejects ambiguous scopes, config, schema and defaults with source locations', () => {
+  test('ambiguous or invalid config, scopes, schema and defaults are rejected with file and line', () => {
     const cases = [
       ['# env-manager local:yes', 'local must be true or false'],
       ['# env-manager local:true\n# env-manager local:false', 'Duplicate'],
@@ -56,6 +56,7 @@ describe('root config validation', () => {
       ['A=2 # {int:min(3)}', 'Invalid default'],
       ['A= # {int:min(3),max(2)}', 'min() exceeds max()'],
       ['# env-manager nonsense', 'Malformed'],
+      ['# env-manager env: staging', 'belongs in'],
     ];
     for (const [content, reason] of cases) {
       expect(() => parseRootConfig(content, 'root.env')).toThrow(reason);
@@ -63,12 +64,12 @@ describe('root config validation', () => {
     }
   });
 
-  test('validates regex grouping and character classes without confusing validator delimiters', () => {
+  test('a ) or / inside a format regex does not end the validator', () => {
     const config = parseRootConfig('TOKEN= # {string:format(/^sk-(foo|bar)[/)]+$/)}\n');
     expect(config.schema[0].validators[0].kind).toBe('format');
   });
 
-  test('format preserves raw values, comments, and scope ordering, and is idempotent', () => {
+  test('format keeps values, comments and scope order, and formatting twice changes nothing', () => {
     const content = `# notes stay here
 # env-manager: demo
 # env-manager target:   client  format=ts

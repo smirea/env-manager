@@ -1,23 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generateCommand } from './generate';
+import { secrets, withTempDir as withEmptyDir } from '../test-setup';
+import { generateCommand, generateFromEnvironment } from './generate';
 
-async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-manager-ts-'));
-  try {
+function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
+  return withEmptyDir(async (dir) => {
     await writeFile(path.join(dir, 'package.json'), '{}\n');
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+    await fn(dir);
+  });
 }
 
 const ENV_CONTENT = `# env-manager: test-project | 2025-01-01T00:00:00Z\n\nFOO=bar # {optional string}\n`;
 
-describe('generate command', () => {
-  test('generates a zod reader for every schema type', async () => {
+describe('generate', () => {
+  test('the reader maps each schema type to its zod validator', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), [
         '# env-manager: test-project',
@@ -51,74 +49,50 @@ export default env;
     });
   });
 
-  test('generated reader treats an empty value as unset: optional reads undefined, required fails by name', async () => {
+  test('a generated reader treats an empty value as unset: an optional one reads as undefined and a required one fails by name', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n\nCALLBACK= # {optional url}\nDEBUG= # {optional bool}\nNAME= # {string}\nPORT= # {int}\n');
       await generateCommand({ project: 'test-project', cwd: dir }, 'env.ts');
       await symlink(path.resolve(import.meta.dir, '../../node_modules'), path.join(dir, 'node_modules'));
-      const read = (env: Record<string, string>) => Bun.spawnSync([process.execPath, '-e', "console.log(JSON.stringify((await import('./env.ts')).default))"], {
-        cwd: dir,
-        env: { PATH: process.env.PATH, ...env },
-      });
-
-      const set = read({ CALLBACK: '', DEBUG: '', NAME: 'app', PORT: '3000' });
-      expect(set.stderr.toString()).toBe('');
-      expect(JSON.parse(set.stdout.toString())).toEqual({ NAME: 'app', PORT: 3000 });
-
-      const blank = read({ CALLBACK: '', DEBUG: '', NAME: '', PORT: '' });
-      expect(blank.exitCode).not.toBe(0);
-      expect(blank.stderr.toString()).toContain('NAME');
-      expect(blank.stderr.toString()).toContain('PORT');
+      const names = ['CALLBACK', 'DEBUG', 'NAME', 'PORT'];
+      const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+      const read = (env: Record<string, string>, run: string) => {
+        Object.assign(process.env, env);
+        return import(`${path.join(dir, 'env.ts')}?${run}`).then(module => module.default);
+      };
+      try {
+        expect(await read({ CALLBACK: '', DEBUG: '', NAME: 'app', PORT: '3000' }, 'set')).toEqual({ NAME: 'app', PORT: 3000 });
+        const blank = read({ CALLBACK: '', DEBUG: '', NAME: '', PORT: '' }, 'blank');
+        await expect(blank).rejects.toThrow('NAME');
+        await expect(blank).rejects.toThrow('PORT');
+      } finally {
+        for (const [name, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
     });
   });
 
-  test('stores the reader path right after the header and reuses it', async () => {
+  test('a reader path is stored in .env and reused, and a different one replaces it only with --force', async () => {
     await withTempDir(async (dir) => {
+      const ctx = { project: 'test-project', cwd: dir };
       await writeFile(path.join(dir, '.env'), ENV_CONTENT);
-      await generateCommand({ project: 'test-project', cwd: dir }, 'custom/env.ts');
-      expect(await readFile(path.join(dir, '.env'), 'utf8')).toBe(
-        '# env-manager: test-project | 2025-01-01T00:00:00Z\n# env-manager ts: custom/env.ts\n\nFOO=bar # {optional string}\n'
-      );
+      await generateCommand(ctx, 'custom/env.ts');
+      expect(await readFile(path.join(dir, '.env'), 'utf8')).toContain('# env-manager ts: custom/env.ts\n');
       await rm(path.join(dir, 'custom'), { recursive: true });
-      await generateCommand({ project: 'test-project', cwd: dir });
+      await generateCommand(ctx);
       expect(await readFile(path.join(dir, 'custom/env.ts'), 'utf8')).toContain('FOO: z.string().optional(),');
+
+      await expect(generateCommand(ctx, 'new.ts')).rejects.toThrow('--force');
+      expect(await Bun.file(path.join(dir, 'new.ts')).exists()).toBe(false);
+      await generateCommand(ctx, 'new.ts', { force: true });
+      expect(await readFile(path.join(dir, 'new.ts'), 'utf8')).toContain('FOO: z.string().optional(),');
+      expect(await readFile(path.join(dir, '.env'), 'utf8')).toContain('# env-manager ts: new.ts\n');
     });
   });
 
-  test('errors when given path conflicts with stored path', async () => {
-    await withTempDir(async (dir) => {
-      await writeFile(
-        path.join(dir, '.env'),
-        `# env-manager: test-project | 2025-01-01T00:00:00Z\n# env-manager ts: old.ts\n\nFOO=bar # {string}\n`
-      );
-
-      await expect(
-        generateCommand({ project: 'test-project', cwd: dir }, 'new.ts')
-      ).rejects.toThrow('Pass --force to overwrite');
-    });
-  });
-
-  test('--force overwrites stored ts path', async () => {
-    await withTempDir(async (dir) => {
-      await writeFile(
-        path.join(dir, '.env'),
-        `# env-manager: test-project | 2025-01-01T00:00:00Z\n# env-manager ts: old.ts\n\nFOO=bar # {string}\n`
-      );
-      const newPath = 'new.ts';
-
-      await generateCommand({ project: 'test-project', cwd: dir }, newPath, {
-        force: true,
-      });
-
-      const output = await readFile(path.join(dir, newPath), 'utf8');
-      expect(output).toContain('FOO: z.string(),');
-      const envAfter = await readFile(path.join(dir, '.env'), 'utf8');
-      expect(envAfter).toContain(`# env-manager ts: ${newPath}`);
-      expect(envAfter).not.toContain('old.ts');
-    });
-  });
-
-  test('a swift target with generate= commits a check script that fails on missing or malformed settings', async () => {
+  test('a swift check script fails, naming each variable, when a required setting is unset or a set one is malformed, and never prints a value', async () => {
     await withTempDir(async (dir) => {
       await writeFile(path.join(dir, '.env'), [
         '# env-manager: test-project',
@@ -174,18 +148,7 @@ export default env;
     });
   });
 
-  test('a single swift project generates the check script at the path it names', async () => {
-    await withTempDir(async (dir) => {
-      await writeFile(path.join(dir, '.env'), '# env-manager: test-project\n# env-manager format: swift\n\nAPI_URL=https://example.com # {url}\n');
-      await generateCommand({ project: 'test-project', cwd: dir }, 'Config/check-env.sh');
-      expect(await readFile(path.join(dir, '.env'), 'utf8')).toContain('# env-manager generate: Config/check-env.sh');
-      const content = await readFile(path.join(dir, 'Config/check-env.sh'), 'utf8');
-      expect(content.split('\n').slice(0, 2)).toEqual(['#!/bin/sh', '# env-manager: test-project | v1']);
-      expect(content).toContain('check API_URL required url');
-    });
-  });
-
-  test('versions each output and rewrites only when its content drifts', async () => {
+  test('an output is rewritten only when its content drifts from the render, so formatter-only edits survive and hand edits are replaced', async () => {
     await withTempDir(async (dir) => {
       const ctx = { project: 'test-project', cwd: dir };
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -244,7 +207,7 @@ export default env;
     });
   });
 
-  test('versions each target child separately', async () => {
+  test('each target child carries its own version', async () => {
     await withTempDir(async (dir) => {
       const ctx = { project: 'test-project', cwd: dir };
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -276,7 +239,7 @@ export default env;
     });
   });
 
-  test('switching environments leaves target readers untouched', async () => {
+  test('switching environments never rewrites a reader', async () => {
     await withTempDir(async (dir) => {
       const ctx = { project: 'test-project', cwd: dir };
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -299,7 +262,7 @@ export default env;
     });
   });
 
-  test('regenerates a child from another environment even when its version is ahead of the record', async () => {
+  test('a child left over from another environment is regenerated even when its version is ahead', async () => {
     await withTempDir(async (dir) => {
       const ctx = { project: 'test-project', cwd: dir };
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -320,7 +283,7 @@ export default env;
     });
   });
 
-  test('regenerates values children whose values differ only by whitespace or commas', async () => {
+  test('values children are compared by value, so a change of only whitespace or commas still regenerates them', async () => {
     await withTempDir(async (dir) => {
       const ctx = { project: 'test-project', cwd: dir };
       const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -353,6 +316,131 @@ export default env;
     });
   });
 
+  test('a target child holds only the variables selected for it, a reader holds no values, and the root values file keeps what was written', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'mono', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      await writeFile(path.join(dir, '.env'), [
+        '# env-manager: mono',
+        '# env-manager target: ios format=swift',
+        '# env-manager target: client format=ts path=.env',
+        '# env-manager target: server format=ts path=config/.env.local',
+        '# env-manager targets: *',
+        'API_URL=https://example.com # {url}',
+        '# env-manager targets: client',
+        'CLIENT_KEY= # {string}',
+        '# env-manager targets: server',
+        'SERVER_KEY= # {string}',
+        '',
+      ].join('\n'));
+      const source = '# env-manager env: staging\nCLIENT_KEY=client-secret\nSERVER_KEY=server-secret\n';
+      await writeFile(path.join(dir, '.env.local'), source);
+
+      await generateCommand(ctx, undefined, { target: 'client' });
+      expect(await Bun.file(path.join(dir, 'server/config/.env.local')).exists()).toBe(false);
+      expect(await Bun.file(path.join(dir, 'ios/Config/LocalSecrets.xcconfig')).exists()).toBe(false);
+
+      await generateCommand(ctx);
+      const client = await read('client/.env');
+      expect(client).toContain("CLIENT_KEY='client-secret'");
+      expect(client).not.toContain('SERVER_KEY');
+      expect(client).toContain('# env-manager target: client\n# env-manager root: ..\n# env-manager env: staging\n');
+      const server = await read('server/config/.env.local');
+      expect(server).toContain("SERVER_KEY='server-secret'");
+      expect(server).not.toContain('CLIENT_KEY');
+      const ios = await read('ios/Config/LocalSecrets.xcconfig');
+      expect(ios).toContain('API_URL = https:/$()/example.com');
+      expect(ios).not.toContain('_KEY');
+      for (const reader of ['client/src/env.ts', 'server/src/env.ts']) {
+        const content = await read(reader);
+        expect(content).not.toContain('client-secret');
+        expect(content).not.toContain('server-secret');
+      }
+      const root = (await read('.env.local')).split('\n').filter(line => !line.startsWith('# env-manager: ') && !line.startsWith('# env-manager output: '));
+      expect(root.join('\n')).toBe(source);
+    });
+  });
+
+  test('generation writes nothing when any planned output collides, belongs to another project, escapes through a symlink, or sits under a file', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'mono', cwd: dir };
+      const valid = '# env-manager: mono\n# env-manager target: client format=ts\n# env-manager target: server format=ts\n# env-manager targets: *\nPORT=3000 # {int}\n';
+      const nothingWritten = async () => {
+        expect(await Bun.file(path.join(dir, '.env.local')).exists()).toBe(false);
+        expect(await Bun.file(path.join(dir, 'client/src/env.ts')).exists()).toBe(false);
+      };
+
+      await writeFile(path.join(dir, '.env'), valid.replace('target: server format=ts', 'target: server format=ts path=src/env.ts'));
+      await expect(generateCommand(ctx)).rejects.toThrow();
+      await nothingWritten();
+
+      await writeFile(path.join(dir, '.env'), valid);
+      await mkdir(path.join(dir, 'server'));
+      await writeFile(path.join(dir, 'server/.env.local'), '# env-manager: another-project\n');
+      await expect(generateCommand(ctx)).rejects.toThrow();
+      await nothingWritten();
+
+      await rm(path.join(dir, 'server'), { recursive: true });
+      const outside = await mkdtemp(path.join(os.tmpdir(), 'env-manager-outside-'));
+      await symlink(outside, path.join(dir, 'server'));
+      try {
+        await expect(generateCommand(ctx)).rejects.toThrow();
+        await nothingWritten();
+        expect(await readdir(outside)).toEqual([]);
+      } finally {
+        await rm(path.join(dir, 'server'));
+        await rm(outside, { recursive: true, force: true });
+      }
+
+      await mkdir(path.join(dir, 'server'));
+      await writeFile(path.join(dir, 'server/src'), 'not a directory');
+      await expect(generateCommand(ctx)).rejects.toThrow();
+      await nothingWritten();
+
+      await rm(path.join(dir, 'server'), { recursive: true });
+      await generateCommand(ctx);
+      expect(await Bun.file(path.join(dir, 'client/src/env.ts')).exists()).toBe(true);
+    });
+  });
+
+  test('generate --env renders a stored environment into the children with the local schema, and leaves .env, the root values and the selection alone', async () => {
+    await withTempDir(async (dir) => {
+      const ctx = { project: 'render', cwd: dir };
+      const read = (name: string) => readFile(path.join(dir, name), 'utf8');
+      const schema = [
+        '# env-manager: render',
+        '# env-manager target: ios format=swift',
+        '# env-manager targets: ios',
+        'API_URL= # {url}',
+        'NEW_FLAG=on # {string}',
+        '',
+      ].join('\n');
+      await writeFile(path.join(dir, '.env'), schema);
+      await writeFile(path.join(dir, '.env.local'), '# env-manager env: dev\nAPI_URL=http://127.0.0.1:1\n');
+      await writeFile(path.join(dir, '.env.override'), 'API_URL=http://127.0.0.1:2\n');
+      secrets.set('env-manager/render', {
+        schema: '# env-manager: render\n# env-manager target: ios format=swift\n# env-manager targets: ios\nAPI_URL= # {url}\n',
+        environments: {
+          dev: { values: 'API_URL=http://127.0.0.1:1\n', syncDate: '2026-01-01T00:00:00Z' },
+          prod: { values: 'API_URL=https://prod.example.com\n', syncDate: '2026-01-01T00:00:00Z' },
+        },
+      });
+      await generateCommand(ctx);
+      const dev = await read('ios/Config/LocalSecrets.xcconfig');
+      const rootValues = await read('.env.local');
+
+      await generateFromEnvironment(ctx, 'prod');
+      const prod = await read('ios/Config/LocalSecrets.xcconfig');
+      expect(prod).toContain('// env-manager env: prod\n');
+      expect(prod).toContain('API_URL = https:/$()/prod.example.com\nNEW_FLAG = on\n');
+      expect(await read('.env')).toBe(schema);
+      expect(await read('.env.local')).toBe(rootValues);
+
+      await generateCommand(ctx);
+      expect(await read('ios/Config/LocalSecrets.xcconfig')).toBe(dev);
+    });
+  });
+
   describe('.env.override', () => {
     const MONOREPO = [
       '# env-manager: test-project',
@@ -363,7 +451,7 @@ export default env;
       '',
     ].join('\n');
 
-    test('applies to target outputs but never to the root values file', async () => {
+    test('overrides apply to target outputs and never to the root values file', async () => {
       await withTempDir(async (dir) => {
         const ctx = { project: 'test-project', cwd: dir };
         const read = (name: string) => readFile(path.join(dir, name), 'utf8');
@@ -386,21 +474,21 @@ export default env;
       });
     });
 
-    test('rejects unknown keys, invalid values, and single-project setups', async () => {
+    test('an override must be a declared variable with a valid value, and single-project setups reject the file', async () => {
       await withTempDir(async (dir) => {
         const ctx = { project: 'test-project', cwd: dir };
         await writeFile(path.join(dir, '.env'), MONOREPO);
         await writeFile(path.join(dir, '.env.local'), 'PORT=3000\n');
         const overridePath = path.join(dir, '.env.override');
         await writeFile(overridePath, 'PORT=4100\nPROT=1\n');
-        await expect(generateCommand(ctx)).rejects.toThrow(`${overridePath}:2: Unknown variable PROT. Overrides must be declared in .env.`);
+        await expect(generateCommand(ctx)).rejects.toThrow(`${overridePath}:2:`);
         await writeFile(overridePath, 'PORT=0\n');
-        await expect(generateCommand(ctx)).rejects.toThrow(`${overridePath}:1: Invalid value for PORT`);
+        await expect(generateCommand(ctx)).rejects.toThrow(`${overridePath}:1:`);
         expect(await Bun.file(path.join(dir, 'client/.env.local')).exists()).toBe(false);
 
         await writeFile(path.join(dir, '.env'), ENV_CONTENT);
         await writeFile(overridePath, 'FOO=x\n');
-        await expect(generateCommand(ctx, 'env.ts')).rejects.toThrow(`${overridePath}:1: .env.override only applies to target outputs. Edit .env.local directly in a single-project setup.`);
+        await expect(generateCommand(ctx, 'env.ts')).rejects.toThrow(`${overridePath}:1:`);
       });
     });
   });

@@ -35,7 +35,7 @@
     "scripts": {
         "lint": "oxlint --fix",
         "lint:ci": "oxlint",
-        "typecheck": "tsgo --noEmit",
+        "typecheck": "bun check",
         "test": "bun test",
         "dev": "bun --watch src/cli.ts"
     },
@@ -47,12 +47,10 @@
     },
     "devDependencies": {
         "@changesets/cli": "3.0.3",
-        "@types/bun": "^1.3.6",
+        "@types/bun": "^1.4.4",
         "@types/yargs": "^17.0.35",
-        "@typescript/native-preview": "^7.0.0-dev.20260127.1",
-        "lefthook": "^2.0.16",
-        "oxlint": "^1.1.0",
-        "typescript": "^5.9.3"
+        "lefthook": "^2.2.2",
+        "oxlint": "^1.94.0"
     },
     "packageManager": "bun@1.4.4"
 }

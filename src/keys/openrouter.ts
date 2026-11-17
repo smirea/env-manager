@@ -18,11 +18,11 @@ const ISO_8601_UTC_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const DEFAULT_MONTHLY_LIMIT_USD = 10;
 
-export function isValidOpenRouterApiKey(key: string): boolean {
+function isValidOpenRouterApiKey(key: string): boolean {
   return /^sk-or-v1-[a-zA-Z0-9-_]+$/.test(key);
 }
 
-export function extractOpenRouterApiKey(
+function extractOpenRouterApiKey(
   payload: OpenRouterCreateKeyResponse
 ): string | null {
   if (typeof payload.key === "string") {

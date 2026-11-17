@@ -57,6 +57,9 @@ jobs:
       - name: Tests
         if: matrix.task == 'tests'
         run: bun run test
+      - name: The package holds only the source, the manifest, the README and the license
+        if: matrix.task == 'install'
+        run: bun .github/scripts/check-package.ts
       - name: Global install
         if: matrix.task == 'install'
         run: |
