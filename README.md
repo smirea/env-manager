@@ -90,6 +90,7 @@ env-manager generate
 | `env set <env>` | Select an environment and download it, or seed a new one |
 | `env list` (`env ls`) | List environments for a project |
 | `env rm <env>` | Remove an environment from AWS |
+| `sync github <env> [--only A,B] [--repo owner/name] [--dry-run]` | Set the repository's GitHub Actions secrets from a stored environment |
 | `global set` | Set a global default env var |
 | `global get [NAME]` | Get a global default env var |
 | `global list` (`global ls`) | List all global default env vars |
@@ -141,6 +142,9 @@ The persistent `# env-manager local:true` setting also disables all Git updates.
 | `--values-format <ts\|swift>` | Values output format (`init` only) |
 | `--values-path <path>` | Values output path (`init` only; otherwise the format default) |
 | `-e, --env <name>` | Print only one environment (`print` only) |
+| `--only <names>` | Sync only these variables, comma-separated or repeated (`sync github` only) |
+| `--repo <owner/name>` | Repository to write to (`sync github` only; default: the one `gh` resolves for the directory) |
+| `--dry-run` | Name the secrets that would be set without setting them (`sync github` only) |
 | `--name <name>` | OpenRouter key name (`new-key OPENROUTER_API_KEY` only; default: project name) |
 | `--credit <usd>` | OpenRouter key credit limit in USD/month (`new-key OPENROUTER_API_KEY` only; default: `10`) |
 | `--unlimited` | Create OpenRouter key without a credit limit (`new-key OPENROUTER_API_KEY` only) |

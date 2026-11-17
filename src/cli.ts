@@ -25,6 +25,7 @@ import { listKeysCommand, newKeyCommand } from './commands/new-key';
 import { printCommand } from './commands/print';
 import { rmCommand } from './commands/rm';
 import { setCommand } from './commands/set';
+import { syncGithubCommand } from './commands/sync';
 import { upCommand } from './commands/up';
 
 const HELP_FOOTER = `Supported schema formats:
@@ -316,6 +317,27 @@ const commands: (Command | Group)[] = [
         builder: y => y.positional('environment', { type: 'string', description: 'Environment name' }),
         needs: named,
         run: (argv, ctx) => envRmCommand(ctx, requireArg(argv.environment, 'env rm <environment>')),
+      },
+    ],
+  },
+  {
+    command: 'sync',
+    describe: 'Push a stored environment to another host',
+    commands: [
+      {
+        command: 'github <environment>',
+        describe: "Set the repository's GitHub Actions secrets from a stored environment, through the gh CLI",
+        builder: y => y
+          .positional('environment', { type: 'string', description: 'Stored environment to read, such as prod' })
+          .option('only', { type: 'string', array: true, description: 'Sync only these variables (comma-separated or repeated). Default: every variable with a value' })
+          .option('repo', { type: 'string', description: 'owner/name (default: the repository gh resolves for this directory)' })
+          .option('dry-run', { type: 'boolean', default: false, description: 'Name the secrets that would be set without setting them' }),
+        needs: inspect,
+        run: (argv, ctx) => syncGithubCommand(ctx, requireArg(argv.environment, 'sync github <environment>'), {
+          only: argv.only,
+          repo: argv.repo,
+          dryRun: argv.dryRun,
+        }),
       },
     ],
   },
