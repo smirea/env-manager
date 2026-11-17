@@ -133,6 +133,12 @@ function checkLines(s: EnvVarSchema): string[] {
   return lines;
 }
 
+// Formatters only touch whitespace, quotes, semicolons, commas and parens, so a reader that
+// still differs after dropping those was edited by hand.
+function formatterFingerprint(content: string): string {
+  return content.replace(/[\s'"`;,()]/g, '');
+}
+
 export const READERS = {
   ts: {
     defaultPath: 'src/env.ts',
@@ -140,12 +146,7 @@ export const READERS = {
     preamble: '',
     executable: false,
     render: schema => TS_HEADER + schema.map(zodField).join('\n') + '\n' + TS_FOOTER,
-    // Formatters only touch whitespace, quotes, semicolons, commas and parens, so a reader that
-    // still differs after dropping those was edited by hand.
-    matches: (existing, rendered) => {
-      const fingerprint = (content: string) => content.replace(/[\s'"`;,()]/g, '');
-      return fingerprint(existing) === fingerprint(rendered);
-    },
+    matches: (existing, rendered) => formatterFingerprint(existing) === formatterFingerprint(rendered),
   },
   swift: {
     defaultPath: null,

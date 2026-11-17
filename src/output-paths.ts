@@ -5,14 +5,13 @@ import { configError, EnvManagerError } from './errors';
 import { readMetadata } from './metadata';
 
 async function physicalPath(path: string): Promise<string> {
-  try {
-    return await realpath(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    if (await lstat(path).catch(() => null)) throw new Error(`Broken symlink at ${path}`);
-    const parent = dirname(path);
-    return join(await physicalPath(parent), basename(path));
-  }
+  const real = await realpath(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  });
+  if (real !== null) return real;
+  if (await lstat(path).catch(() => null)) throw new Error(`Broken symlink at ${path}`);
+  return join(await physicalPath(dirname(path)), basename(path));
 }
 
 function inside(directory: string, path: string): boolean {

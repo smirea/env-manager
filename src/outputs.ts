@@ -44,7 +44,7 @@ export function sameOutputs(left: OutputVersions, right: OutputVersions): boolea
 // else is new content and takes the next number.
 function resolveVersion(key: string, hash: string, candidates: (OutputVersions | undefined)[], fileVersion: number | null): OutputVersion {
   const entries = candidates.map(c => c?.[key]).filter((e): e is OutputVersion => !!e);
-  const match = entries.filter(e => e.hash === hash).sort((a, b) => b.version - a.version)[0];
+  const match = entries.filter(e => e.hash === hash).toSorted((a, b) => b.version - a.version)[0];
   if (match) return match;
   return { version: Math.max(fileVersion ?? 0, ...entries.map(e => e.version)) + 1, hash, date: new Date().toISOString() };
 }

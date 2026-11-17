@@ -9,7 +9,7 @@ export async function listCommand(): Promise<void> {
     for (const name of projects) console.log(`  ${name}`);
   }
 
-  const globalKeys = Object.keys((await readGlobals()).values).sort();
+  const globalKeys = Object.keys((await readGlobals()).values).toSorted();
   console.log('');
   console.log('Global defaults:');
   if (globalKeys.length === 0) {

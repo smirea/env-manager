@@ -5,7 +5,7 @@ import { appendSchemaEntry, parseEnvFile, parseEnvLine, parseEnvValues, serializ
 
 const GLOBAL_PROJECT = 'default';
 export const GLOBAL_LABEL = 'global defaults';
-const RESERVED_PROJECT_NAMES = [GLOBAL_PROJECT, 'global'];
+const RESERVED_PROJECT_NAMES = new Set([GLOBAL_PROJECT, 'global']);
 
 const NAMESPACE = 'env-manager/';
 
@@ -53,7 +53,7 @@ export function validateProjectName(project: string, command: string, options: {
   if (!NAME_PATTERN.test(project)) {
     throw new EnvManagerError(`Invalid project name "${project}". Project names cannot include spaces or "|".`);
   }
-  if (options.reserved && RESERVED_PROJECT_NAMES.includes(project)) {
+  if (options.reserved && RESERVED_PROJECT_NAMES.has(project)) {
     throw new EnvManagerError(`"${project}" is a reserved project name and cannot be used with ${command}`);
   }
 }
@@ -63,7 +63,7 @@ export function canonicalSchema(content: string): string {
 }
 
 export function environmentNames(secret: ProjectSecret): string[] {
-  return Object.keys(secret.environments).sort();
+  return Object.keys(secret.environments).toSorted();
 }
 
 export async function readProject(project: string): Promise<ProjectSecret | null> {

@@ -6,10 +6,11 @@ const schema: EnvVarSchema[] = ['GIPHY_API_KEY', 'GEMINI_API_KEY'].map((name, in
   name, type: 'string', optional: false, validators: [], defaultValue: null, lineNumber: index + 1,
 }));
 
+const entry = (name: string, type: 'string' | 'int' | 'float' | 'bool', lineNumber: number) =>
+  ({ name, type, optional: false, validators: [], defaultValue: null, lineNumber });
+
 describe('ts values', () => {
   test('ts values carry their schema comment, leave numbers unquoted, keep extra keys, and parse back', () => {
-    const entry = (name: string, type: 'string' | 'int' | 'float' | 'bool', lineNumber: number) =>
-      ({ name, type, optional: false, validators: [], defaultValue: null, lineNumber });
     const values = { API_KEY: 'sk-test', PORT: '3000', THRESHOLD: '0.25', ENABLED: 'true', NAME: "C:\\O'Reilly", EXTRA: 'yes' };
     const content = FORMATS.ts.render(
       [entry('API_KEY', 'string', 1), entry('PORT', 'int', 2), entry('THRESHOLD', 'float', 3), entry('ENABLED', 'bool', 4), entry('NAME', 'string', 5)],

@@ -7,6 +7,8 @@ import { envSetCommand } from './env';
 import { generateCommand } from './generate';
 import { upCommand } from './up';
 
+const latestLocalOutput = () => puts.at(-1)?.environments?.local.outputs?.['.env.local'];
+
 describe('up', () => {
   test('up writes to AWS only when the schema or values changed, each change bumps the version, and .env never carries one', async () => {
     await withTempDir(async (dir) => {
@@ -16,14 +18,13 @@ describe('up', () => {
       await writeFile(path.join(dir, '.env'), '# env-manager: demo | 2025-01-01T00:00:00Z\n\nFOO= # {string}\n');
       await writeFile(path.join(dir, '.env.local'), 'FOO=one\n');
       const writes = puts.length;
-      const outputs = () => puts.at(-1)?.environments?.local.outputs?.['.env.local'];
 
       await upCommand(ctx);
       expect(puts.length - writes).toBe(1);
       expect(puts.at(-1)?.schema).toBe('# env-manager: demo\n\nFOO= # {string}\n');
-      expect(outputs()?.version).toBe(1);
+      expect(latestLocalOutput()?.version).toBe(1);
       expect(await read('.env')).toBe('# env-manager: demo\n\nFOO= # {string}\n');
-      expect(await read('.env.local')).toBe(`# env-manager: demo | v1\n# env-manager output: .env.local v1 ${outputs()?.hash}\nFOO=one\n`);
+      expect(await read('.env.local')).toBe(`# env-manager: demo | v1\n# env-manager output: .env.local v1 ${latestLocalOutput()?.hash}\nFOO=one\n`);
 
       await upCommand(ctx);
       expect(puts.length - writes).toBe(1);
@@ -31,7 +32,7 @@ describe('up', () => {
       await writeFile(path.join(dir, '.env.local'), (await read('.env.local')).replace('FOO=one', 'FOO=two'));
       await upCommand(ctx);
       expect(puts.length - writes).toBe(2);
-      expect(outputs()?.version).toBe(2);
+      expect(latestLocalOutput()?.version).toBe(2);
 
       await writeFile(path.join(dir, '.env.local'), 'FOO=stale\n');
       await downCommand(ctx);

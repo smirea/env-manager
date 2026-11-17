@@ -45,7 +45,7 @@ export async function globalGetCommand(keyName?: string): Promise<void> {
 
 export async function globalListCommand(): Promise<void> {
   const globals = await readGlobals();
-  const names = Object.keys(globals.values).sort();
+  const names = Object.keys(globals.values).toSorted();
   if (names.length === 0) {
     console.log('No global defaults found.');
     return;

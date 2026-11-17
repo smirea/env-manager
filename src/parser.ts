@@ -319,8 +319,8 @@ export function envValuesEqual(
   left: EnvValues,
   right: EnvValues
 ): boolean {
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
+  const leftKeys = Object.keys(left).toSorted();
+  const rightKeys = Object.keys(right).toSorted();
   if (leftKeys.length !== rightKeys.length) return false;
   for (let i = 0; i < leftKeys.length; i++) {
     const key = leftKeys[i];

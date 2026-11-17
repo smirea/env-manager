@@ -146,7 +146,7 @@ export function upsertSourceMetadata(
   const lines = content.split('\n').filter(line => !isField(line, 'output'));
   const metadata = [
     formatHeader(prefix, project, version),
-    ...Object.keys(record).sort().map(key => formatDirective(prefix, 'output', `${key} v${record[key].version} ${record[key].hash}`)),
+    ...Object.keys(record).toSorted().map(key => formatDirective(prefix, 'output', `${key} v${record[key].version} ${record[key].hash}`)),
   ];
   const header = lines.findIndex(isHeader);
   if (header === -1) lines.unshift(...metadata);

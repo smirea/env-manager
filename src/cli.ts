@@ -216,8 +216,8 @@ const commands: (Command | Group)[] = [
     describe: 'Normalize .env formatting while preserving comments, values, order, and scopes',
     needs: project,
     run: async (_argv, ctx) => {
-      const project = await loadProject(ctx);
-      await writeManagedFile(project.envPath, formatRootConfig(project.content, project.envPath));
+      const loaded = await loadProject(ctx);
+      await writeManagedFile(loaded.envPath, formatRootConfig(loaded.content, loaded.envPath));
       console.log('Formatted .env');
     },
   },
