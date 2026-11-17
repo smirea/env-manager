@@ -68,7 +68,7 @@ describe('sync github', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  test('sets every variable that has a value, sends a file variable as its contents on stdin, skips unset and GITHUB_* names, and never prints a value', async () => {
+  test('sync github sets every variable that has a value, sends a file variable as its contents on stdin, skips unset and GITHUB_* names, and never prints a value', async () => {
     await syncGithubCommand(ctx, 'prod');
     expect(await calls()).toEqual([
       ['API_URL', 'acme/from-gh', 'https://demo.example'],
