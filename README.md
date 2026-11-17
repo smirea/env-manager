@@ -11,11 +11,7 @@ Requires [Bun](https://bun.sh). Install the CLI globally:
 bun add -g @stefan.inc/env-manager
 ```
 
-Or add it to a project:
-
-```bash
-bun add -d @stefan.inc/env-manager
-```
+It is a tool for your machine, not a project dependency: see [CI and deploys](#ci-and-deploys).
 
 For local development, `bun install && bun link` in this repo.
 
@@ -447,6 +443,56 @@ environment has been removed remotely. `env-manager down --env prod` picks the
 environment explicitly and records it as the current one. With no recorded
 environment, `down` uses the only stored environment, and fails listing the
 available ones when there are several.
+
+## CI and deploys
+
+env-manager is a tool for the developer's machine. Install it globally; never
+add it as a project dependency, and never install or run it in CI or a build.
+What makes that work:
+
+- **Commit what `generate` writes.** The readers and the Swift check script
+  hold no values. They are what fails, naming the variable, when the
+  environment is incomplete, wherever the code runs.
+- **Required variables have a harmless default** in the tracked `.env`, such as
+  a local URL or a port. Secrets stay optional in the schema, and the app's own
+  config requires them in production.
+- **CI reads defaults without a values file.** Bun loads the tracked `.env`
+  for a script run from the repository root, which is all a single-root
+  project needs. A script that runs from a subdirectory, as targets do, gets
+  none of it, and neither does xcodebuild, so list the required defaults in
+  the workflow's `env:`:
+
+  ```yaml
+  # The schema defaults the committed readers require. Nothing here is secret.
+  env:
+    API_URL: http://127.0.0.1:6121
+    API_PORT: 6121
+  ```
+
+- **Xcode builds without a generated xcconfig.** Include it with
+  `#include? "LocalSecrets.xcconfig"`. xcodebuild resolves `$(API_URL)` from
+  its process environment when no xcconfig defines it, and the check script
+  stops the build when no value arrives either way.
+- **Credentials come from repository secrets.** Push them from a stored
+  environment, then pass each one to the job that needs it:
+
+  ```bash
+  env-manager sync github prod --dry-run
+  env-manager sync github prod --only CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID
+  ```
+
+  ```yaml
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  ```
+
+`sync github <env>` sets every variable that has a value in that environment
+as a GitHub Actions repository secret, through the `gh` CLI. `--only` narrows
+it to the names given and fails before setting anything when one is unknown,
+unset, or reserved by GitHub (`GITHUB_*`). Without `--only`, unset and reserved
+variables are skipped and listed. A `file` variable sends the stored file's
+contents. Values go to `gh` on stdin and are never printed. `--repo owner/name`
+picks the repository; the default is the one `gh` resolves for the directory.
 
 ## Global Defaults
 
